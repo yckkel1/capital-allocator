@@ -15,61 +15,18 @@ import math
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import Dict, List, Tuple
-from dataclasses import dataclass, asdict
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv
 import numpy as np
 
-# Load environment variables
-load_dotenv()
+# Import configuration
+from config import get_settings, get_trading_config
+from config_loader import TradingConfig, ConfigLoader
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-DAILY_BUDGET = Decimal("1000.00")
+settings = get_settings()
+DATABASE_URL = settings.database_url
 RISK_FREE_RATE = 0.05  # 5% annual
-
-
-@dataclass
-class StrategyParameters:
-    """Current strategy parameters that can be tuned"""
-    # Regime thresholds
-    regime_bullish_threshold: float = 0.3
-    regime_bearish_threshold: float = -0.3
-
-    # Risk thresholds
-    risk_high_threshold: float = 70.0
-    risk_medium_threshold: float = 40.0
-
-    # Allocation percentages for bullish regime
-    allocation_low_risk: float = 0.8
-    allocation_medium_risk: float = 0.5
-    allocation_high_risk: float = 0.3
-
-    # Neutral regime allocation
-    allocation_neutral: float = 0.2
-
-    # Sell percentage in bearish regime
-    sell_percentage: float = 0.7
-
-    # Asset ranking weights
-    momentum_weight: float = 0.6
-    price_momentum_weight: float = 0.4
-
-    # Max drawdown tolerance
-    max_drawdown_tolerance: float = 15.0  # Percentage
-
-    # Minimum Sharpe ratio target
-    min_sharpe_target: float = 1.0
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary"""
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict):
-        """Create from dictionary"""
-        return cls(**data)
 
 
 @dataclass
@@ -104,7 +61,9 @@ class StrategyTuner:
         self.conn = psycopg2.connect(DATABASE_URL)
         self.cursor = self.conn.cursor(cursor_factory=RealDictCursor)
         self.lookback_months = lookback_months
-        self.current_params = StrategyParameters()
+        self.config_loader = ConfigLoader(DATABASE_URL)
+        # Load current active parameters from database
+        self.current_params = self.config_loader.get_active_config()
 
     def close(self):
         self.cursor.close()
@@ -472,14 +431,32 @@ class StrategyTuner:
     def tune_parameters(self,
                        evaluations: List[TradeEvaluation],
                        condition_analysis: Dict,
-                       overall_metrics: Dict) -> StrategyParameters:
+                       overall_metrics: Dict) -> TradingConfig:
         """
         Adjust parameters based on analysis
 
         Returns:
-            Updated StrategyParameters
+            Updated TradingConfig
         """
-        new_params = StrategyParameters()  # Start with defaults
+        # Create new params based on current config
+        new_params = TradingConfig(
+            daily_capital=self.current_params.daily_capital,
+            assets=self.current_params.assets,
+            lookback_days=self.current_params.lookback_days,
+            regime_bullish_threshold=self.current_params.regime_bullish_threshold,
+            regime_bearish_threshold=self.current_params.regime_bearish_threshold,
+            risk_high_threshold=self.current_params.risk_high_threshold,
+            risk_medium_threshold=self.current_params.risk_medium_threshold,
+            allocation_low_risk=self.current_params.allocation_low_risk,
+            allocation_medium_risk=self.current_params.allocation_medium_risk,
+            allocation_high_risk=self.current_params.allocation_high_risk,
+            allocation_neutral=self.current_params.allocation_neutral,
+            sell_percentage=self.current_params.sell_percentage,
+            momentum_weight=self.current_params.momentum_weight,
+            price_momentum_weight=self.current_params.price_momentum_weight,
+            max_drawdown_tolerance=self.current_params.max_drawdown_tolerance,
+            min_sharpe_target=self.current_params.min_sharpe_target
+        )
 
         momentum_perf = condition_analysis['momentum']
         choppy_perf = condition_analysis['choppy']
@@ -488,41 +465,40 @@ class StrategyTuner:
         # 1. Adjust allocation based on momentum performance
         if momentum_perf['should_be_more_aggressive']:
             # Increase allocations during low/medium risk
-            new_params.allocation_low_risk = min(1.0, self.current_params.allocation_low_risk + 0.1)
-            new_params.allocation_medium_risk = min(0.7, self.current_params.allocation_medium_risk + 0.1)
+            new_params.allocation_low_risk = min(1.0, new_params.allocation_low_risk + 0.1)
+            new_params.allocation_medium_risk = min(0.7, new_params.allocation_medium_risk + 0.1)
             print("  📈 Detected: Too conservative during momentum - increasing allocations")
 
         if momentum_perf['should_be_more_conservative']:
             # Decrease allocations
-            new_params.allocation_low_risk = max(0.5, self.current_params.allocation_low_risk - 0.1)
-            new_params.allocation_medium_risk = max(0.3, self.current_params.allocation_medium_risk - 0.1)
+            new_params.allocation_low_risk = max(0.5, new_params.allocation_low_risk - 0.1)
+            new_params.allocation_medium_risk = max(0.3, new_params.allocation_medium_risk - 0.1)
             print("  📉 Detected: Too aggressive during momentum - decreasing allocations")
 
         # 2. Adjust choppy market behavior
         if choppy_perf['should_be_more_conservative']:
             # Reduce neutral allocation
-            new_params.allocation_neutral = max(0.1, self.current_params.allocation_neutral - 0.05)
-            new_params.risk_medium_threshold = max(30.0, self.current_params.risk_medium_threshold - 5)
+            new_params.allocation_neutral = max(0.1, new_params.allocation_neutral - 0.05)
+            new_params.risk_medium_threshold = max(30.0, new_params.risk_medium_threshold - 5)
             print("  🌊 Detected: Too aggressive in choppy markets - reducing exposure")
 
         # 3. Adjust max drawdown tolerance based on actual drawdown
-        if overall_metrics.get('max_drawdown', 0) > self.current_params.max_drawdown_tolerance:
+        if overall_metrics.get('max_drawdown', 0) > new_params.max_drawdown_tolerance:
             # Tighten risk controls
-            new_params.max_drawdown_tolerance = self.current_params.max_drawdown_tolerance
-            new_params.risk_high_threshold = max(60.0, self.current_params.risk_high_threshold - 5)
-            new_params.allocation_high_risk = max(0.2, self.current_params.allocation_high_risk - 0.05)
+            new_params.risk_high_threshold = max(60.0, new_params.risk_high_threshold - 5)
+            new_params.allocation_high_risk = max(0.2, new_params.allocation_high_risk - 0.05)
             print(f"  ⚠️  Max drawdown ({overall_metrics['max_drawdown']:.1f}%) exceeded tolerance - tightening risk")
 
         # 4. Adjust based on Sharpe ratio
         sharpe = overall_metrics.get('sharpe_ratio', 0)
-        if sharpe < self.current_params.min_sharpe_target:
+        if sharpe < new_params.min_sharpe_target:
             # Improve risk-adjusted returns by being more selective
-            new_params.regime_bullish_threshold = min(0.4, self.current_params.regime_bullish_threshold + 0.05)
-            new_params.risk_medium_threshold = max(30.0, self.current_params.risk_medium_threshold - 5)
+            new_params.regime_bullish_threshold = min(0.4, new_params.regime_bullish_threshold + 0.05)
+            new_params.risk_medium_threshold = max(30.0, new_params.risk_medium_threshold - 5)
             print(f"  📊 Sharpe ratio ({sharpe:.2f}) below target - increasing selectivity")
-        elif sharpe > self.current_params.min_sharpe_target * 1.5:
+        elif sharpe > new_params.min_sharpe_target * 1.5:
             # We can afford to be slightly more aggressive
-            new_params.regime_bullish_threshold = max(0.2, self.current_params.regime_bullish_threshold - 0.05)
+            new_params.regime_bullish_threshold = max(0.2, new_params.regime_bullish_threshold - 0.05)
             print(f"  ✨ Sharpe ratio ({sharpe:.2f}) strong - can be more aggressive")
 
         # 5. Adjust sell strategy based on bearish performance
@@ -531,73 +507,44 @@ class StrategyTuner:
             avg_bearish_score = sum(e.score for e in bearish_evals) / len(bearish_evals)
             if avg_bearish_score < -0.2:
                 # Sell faster in bearish conditions
-                new_params.sell_percentage = min(0.9, self.current_params.sell_percentage + 0.1)
+                new_params.sell_percentage = min(0.9, new_params.sell_percentage + 0.1)
                 print("  🔻 Poor bearish performance - increasing sell percentage")
 
         return new_params
 
-    def save_parameters(self, params: StrategyParameters, report_path: str):
-        """Save parameters to .env.dev file"""
-        env_content = f"""# Strategy Parameters - Updated {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-# This file contains tuned parameters from monthly strategy review
-# Copy values to your .env file to apply them
+    def save_parameters(self, params: TradingConfig, report_path: str, start_date: date):
+        """
+        Save parameters to database as a new version
 
-# Database (required - copy from your .env)
-DATABASE_URL=your_database_url_here
-ALPHAVANTAGE_API_KEY=your_api_key_here
+        Args:
+            params: New configuration parameters
+            report_path: Path to the report file
+            start_date: Start date for the new configuration
+        """
+        # Save to database
+        config_id = self.config_loader.create_new_version(
+            params,
+            start_date=start_date,
+            created_by='strategy_tuning',
+            notes=f'Monthly tuning - report: {os.path.basename(report_path)}',
+            close_previous=True
+        )
 
-# Trading Parameters
-DAILY_CAPITAL=1000.0
-ASSETS=["SPY", "QQQ", "DIA"]
-LOOKBACK_DAYS=252
+        print(f"\n💾 Parameters saved to database:")
+        print(f"   Config ID: {config_id}")
+        print(f"   Start Date: {start_date}")
+        print(f"   Previous config end date set to: {start_date - timedelta(days=1)}")
 
-# === TUNED STRATEGY PARAMETERS ===
-
-# Regime Detection Thresholds
-REGIME_BULLISH_THRESHOLD={params.regime_bullish_threshold}
-REGIME_BEARISH_THRESHOLD={params.regime_bearish_threshold}
-
-# Risk Level Thresholds
-RISK_HIGH_THRESHOLD={params.risk_high_threshold}
-RISK_MEDIUM_THRESHOLD={params.risk_medium_threshold}
-
-# Allocation Percentages (Bullish Regime)
-ALLOCATION_LOW_RISK={params.allocation_low_risk}
-ALLOCATION_MEDIUM_RISK={params.allocation_medium_risk}
-ALLOCATION_HIGH_RISK={params.allocation_high_risk}
-
-# Neutral Regime Allocation
-ALLOCATION_NEUTRAL={params.allocation_neutral}
-
-# Sell Percentage (Bearish Regime)
-SELL_PERCENTAGE={params.sell_percentage}
-
-# Asset Ranking Weights
-MOMENTUM_WEIGHT={params.momentum_weight}
-PRICE_MOMENTUM_WEIGHT={params.price_momentum_weight}
-
-# Risk Management
-MAX_DRAWDOWN_TOLERANCE={params.max_drawdown_tolerance}
-MIN_SHARPE_TARGET={params.min_sharpe_target}
-"""
-
-        env_dev_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env.dev')
-
-        with open(env_dev_path, 'w') as f:
-            f.write(env_content)
-
-        print(f"\n💾 Parameters saved to: {env_dev_path}")
-
-        # Also save JSON version for programmatic access
+        # Also save JSON version for reference
         json_path = os.path.join(os.path.dirname(report_path), 'tuned_parameters.json')
         with open(json_path, 'w') as f:
-            json.dump(params.to_dict(), f, indent=2)
+            json.dump(params.to_dict(), f, indent=2, default=str)
 
-        print(f"💾 JSON parameters saved to: {json_path}")
+        print(f"💾 JSON backup saved to: {json_path}")
 
     def generate_report(self,
-                       old_params: StrategyParameters,
-                       new_params: StrategyParameters,
+                       old_params: TradingConfig,
+                       new_params: TradingConfig,
                        evaluations: List[TradeEvaluation],
                        condition_analysis: Dict,
                        overall_metrics: Dict,
@@ -728,7 +675,7 @@ MIN_SHARPE_TARGET={params.min_sharpe_target}
         add(f"📝 NEXT STEPS")
         add(f"{'='*80}\n")
         add("1. Review the parameter changes above")
-        add("2. Copy parameters from .env.dev to your .env file to apply them")
+        add("2. New parameters have been saved to the database and will be active from the specified start date")
         add("3. Run backtest with new parameters to validate improvements")
         add("4. Monitor performance over the next month")
         add()
@@ -793,8 +740,11 @@ MIN_SHARPE_TARGET={params.min_sharpe_target}
             start_date, end_date
         )
 
-        # 7. Save parameters
-        self.save_parameters(new_params, report_path)
+        # 7. Save parameters to database with start date = first day of next month
+        # User will run this script on the first trading day of the month
+        # So we set start date to today (first trading day of the month)
+        next_config_start_date = date.today()
+        self.save_parameters(new_params, report_path, next_config_start_date)
 
         print(f"\n{'='*80}")
         print(f"✅ MONTHLY TUNING COMPLETED")

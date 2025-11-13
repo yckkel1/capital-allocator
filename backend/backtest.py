@@ -12,13 +12,12 @@ from typing import List, Dict
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Import configuration
+from config import get_settings, get_trading_config
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-DAILY_BUDGET = Decimal("1000.00")
+settings = get_settings()
+DATABASE_URL = settings.database_url
 
 
 class Backtest:
