@@ -112,67 +112,67 @@ class Backtest:
         """Calculate performance metrics for a given day"""
         # Get current portfolio value
         self.cursor.execute("""
-            SELECT 
+            SELECT
                 symbol,
                 quantity,
                 avg_cost
             FROM portfolio
         """)
         positions = self.cursor.fetchall()
-        
+
         # Get closing prices for the day
         self.cursor.execute("""
-            SELECT symbol, close_price 
-            FROM price_history 
+            SELECT symbol, close_price
+            FROM price_history
             WHERE date = %s
         """, (trade_date,))
         prices = {row['symbol']: Decimal(str(row['close_price'])) for row in self.cursor.fetchall()}
-        
+
         # Calculate portfolio value
         portfolio_value = Decimal(0)
         total_cost = Decimal(0)
-        
+
         for pos in positions:
             symbol = pos['symbol']
             qty = Decimal(str(pos['quantity']))
             avg_cost = Decimal(str(pos['avg_cost']))
-            
+
             current_price = prices.get(symbol, Decimal(0))
             position_value = qty * current_price
             position_cost = qty * avg_cost
-            
+
             portfolio_value += position_value
             total_cost += position_cost
-        
-        # Calculate total capital injected (sum of all BUY trades up to this date)
+
+        # Calculate total capital injected (sum of all BUY trades up to this date within backtest range)
         self.cursor.execute("""
             SELECT SUM(amount) as total_injected
             FROM trades
-            WHERE trade_date <= %s AND action = 'BUY'
-        """, (trade_date,))
+            WHERE trade_date >= %s AND trade_date <= %s AND action = 'BUY'
+        """, (self.start_date, trade_date))
         result = self.cursor.fetchone()
         cash_injected = Decimal(str(result['total_injected'])) if result['total_injected'] else Decimal(0)
-        
-        # Get cash from sells
+
+        # Get cash from sells (within backtest range)
         self.cursor.execute("""
             SELECT SUM(amount) as total_proceeds
             FROM trades
-            WHERE trade_date <= %s AND action = 'SELL'
-        """, (trade_date,))
+            WHERE trade_date >= %s AND trade_date <= %s AND action = 'SELL'
+        """, (self.start_date, trade_date))
         result = self.cursor.fetchone()
         cash_from_sells = Decimal(str(result['total_proceeds'])) if result['total_proceeds'] else Decimal(0)
         
         # Total value = portfolio + cash from sells
         total_value = portfolio_value + cash_from_sells
         
-        # Daily return (vs previous day)
+        # Daily return (vs previous day within backtest range)
         self.cursor.execute("""
-            SELECT total_value 
-            FROM performance_metrics 
-            WHERE date < %s 
-            ORDER BY date DESC 
+            SELECT total_value
+            FROM performance_metrics
+            WHERE date >= %s AND date < %s
+            ORDER BY date DESC
             LIMIT 1
-        """, (trade_date,))
+        """, (self.start_date, trade_date))
         prev_result = self.cursor.fetchone()
         
         if prev_result:
