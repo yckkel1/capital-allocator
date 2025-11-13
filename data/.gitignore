@@ -1,0 +1,9 @@
+# Ignore backtest report files
+back-test/*.txt
+
+# Ignore analytics report files
+analytics/*.txt
+
+# Keep folder structure
+!back-test/README.md
+!analytics/README.md
