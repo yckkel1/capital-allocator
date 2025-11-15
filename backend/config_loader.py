@@ -204,8 +204,7 @@ class ConfigLoader:
                     UPDATE trading_config
                     SET end_date = %s
                     WHERE end_date IS NULL
-                      AND start_date < %s
-                """, (previous_end_date, start_date))
+                """, (previous_end_date,))
 
             # Insert new configuration
             # Note: Wrap assets list in Json() for proper JSONB conversion
