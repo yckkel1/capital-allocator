@@ -2,7 +2,7 @@
 
 ## Overview
 
-The monthly strategy tuning system analyzes past trading performance and automatically adjusts strategy parameters to improve future results. It's designed to run on the **1st trading day of each month** to ensure your strategy adapts to changing market conditions.
+The monthly strategy tuning system analyzes past trading performance and automatically adjusts strategy parameters stored in the database. It's designed to run on the **1st trading day of each month** to ensure your strategy adapts to changing market conditions.
 
 ## How It Works
 
@@ -33,9 +33,14 @@ The system analyzes performance across different conditions:
 - **Choppy performance**: Same metrics during uncertain markets
 - **Overall performance**: Sharpe ratio, max drawdown, total return
 
-### 4. Parameter Adjustment
+### 4. Parameter Adjustment & Database Versioning
 
-Based on the analysis, the system adjusts strategy parameters:
+Based on the analysis, the system adjusts strategy parameters and **saves them to the database** with version tracking:
+
+- **Previous config**: Sets `END_DATE` to last day of previous month
+- **New config**: Sets `START_DATE` to 1st day of current month, `END_DATE = NULL` (active)
+
+This creates a complete audit trail of all parameter changes.
 
 #### Adjustments for Being Too Conservative in Momentum
 - **Indicators**: High win rate (>65%) but low participation (<50% of trades are BUYs) during momentum
@@ -74,8 +79,9 @@ The script will:
 1. Check if today is the 1st trading day of the month
 2. Analyze the past 3 months of performance
 3. Generate a comprehensive report
-4. Update `.env.dev` with new parameters
-5. Save a JSON file with parameter values
+4. **Close previous config** (set END_DATE to last day of previous month)
+5. **Create new config** in database (START_DATE = 1st of current month)
+6. Save a JSON backup of parameter values
 
 ### Force Running (For Testing)
 
@@ -87,6 +93,12 @@ python run_monthly_tuning.py --force
 
 ```bash
 python run_monthly_tuning.py --lookback-months 6
+```
+
+### Direct Strategy Tuning
+
+```bash
+python strategy_tuning.py --lookback-months 3
 ```
 
 ## Output Files
@@ -102,17 +114,26 @@ Contains:
 - **Parameter changes table** showing old vs new values
 - Insights and recommendations
 
-### 2. Updated Parameters (`.env.dev`)
+### 2. Database Record
 
-Location: `.env.dev` (project root)
+Location: `trading_config` table in PostgreSQL
 
-Contains all strategy parameters with updated values. **You must manually copy parameters to your `.env` file to apply them.**
+The new configuration is immediately active. Query to see:
 
-### 3. Parameters JSON
+```sql
+-- View current active config
+SELECT * FROM trading_config WHERE end_date IS NULL;
+
+-- View all historical versions
+SELECT id, start_date, end_date, daily_capital, created_by, notes
+FROM trading_config ORDER BY start_date DESC;
+```
+
+### 3. Parameters JSON (Backup)
 
 Location: `data/strategy-tuning/tuned_parameters.json`
 
-JSON format of all parameters for programmatic access.
+JSON format of all parameters for reference/backup.
 
 ## Understanding the Report
 
@@ -168,28 +189,33 @@ Parameter                                Old Value       New Value       Change
 - 📉 = Parameter decreased
 - (no icon) = No change
 
-## Applying Parameter Changes
+## Viewing Configuration History
 
-1. **Review the report** in `data/strategy-tuning/`
-2. **Open `.env.dev`** to see updated parameters
-3. **Copy parameters to `.env`** that you want to apply:
+The database maintains a complete history of all parameter changes:
 
-```bash
-# Example: Copy specific parameters
-# From .env.dev to .env
-
-ALLOCATION_LOW_RISK=0.9
-ALLOCATION_NEUTRAL=0.15
+```sql
+-- View all configurations with date ranges
+SELECT
+    id,
+    start_date,
+    end_date,
+    daily_capital,
+    allocation_low_risk,
+    allocation_neutral,
+    created_by,
+    notes
+FROM trading_config
+ORDER BY start_date DESC;
 ```
 
-4. **Validate with backtest** (optional but recommended):
-
-```bash
-# Run backtest with new parameters
-python run_backtest_with_analytics.py --start-date 2024-10-01 --end-date 2024-11-12
+Example output:
 ```
-
-5. **Monitor performance** over the next month
+id | start_date | end_date   | daily_capital | created_by      | notes
+---+------------+------------+---------------+-----------------+----------------------------------
+ 3 | 2025-12-01 | NULL       | 1000.00       | strategy_tuning | Monthly tuning - report: ...
+ 2 | 2025-11-01 | 2025-11-30 | 1000.00       | strategy_tuning | Monthly tuning - report: ...
+ 1 | 2025-10-01 | 2025-10-31 | 1000.00       | migration_001   | Initial configuration
+```
 
 ## Strategy Parameters Reference
 
@@ -210,11 +236,12 @@ python run_backtest_with_analytics.py --start-date 2024-10-01 --end-date 2024-11
 ## Best Practices
 
 1. **Run Monthly**: Execute on the 1st trading day to incorporate the previous month's data
-2. **Review Changes**: Don't blindly apply all changes - review the reasoning in the report
+2. **Review Changes**: Review the reasoning in the report before relying on new parameters
 3. **Gradual Adjustments**: The system makes conservative 0.05-0.1 adjustments to avoid over-fitting
-4. **Validate**: Run backtests with new parameters before going live
+4. **Validate**: Run backtests with new parameters to validate improvements
 5. **Monitor**: Track how parameter changes affect real-world performance
-6. **Keep History**: Reports are timestamped - compare month-over-month trends
+6. **Keep History**: Database maintains complete audit trail - compare month-over-month trends
+7. **Rollback**: If needed, you can revert by creating a new config with previous values
 
 ## Troubleshooting
 
@@ -225,6 +252,15 @@ python run_backtest_with_analytics.py --start-date 2024-10-01 --end-date 2024-11
 **Solution**: Run backtest for at least 2-3 months:
 ```bash
 python run_backtest_with_analytics.py --start-date 2024-08-01 --end-date 2024-11-12
+```
+
+### Error: "No active trading configuration found"
+
+**Cause**: No config with `END_DATE IS NULL` in database
+
+**Solution**: Run migration or manually insert initial config:
+```bash
+python migrations/001_add_trading_config.py
 ```
 
 ### No Parameter Changes Recommended
@@ -243,7 +279,7 @@ python run_backtest_with_analytics.py --start-date 2024-08-01 --end-date 2024-11
 **Action**:
 1. Review the "Worst Trades" section to understand what went wrong
 2. Check the market condition analysis
-3. Consider applying changes gradually (50% of recommended change)
+3. Consider manual adjustment if changes seem too aggressive
 
 ## Technical Details
 
@@ -284,17 +320,11 @@ if choppy_market AND buy AND not profitable: score -= 0.3
 3. Calculate drawdown percentage
 4. Attribute trade's P&L proportionally to the drawdown
 
-## Future Enhancements
-
-Potential improvements for future versions:
-
-- [ ] Machine learning-based parameter optimization
-- [ ] Multi-objective optimization (Sharpe, drawdown, return)
-- [ ] Regime-specific parameter sets
-- [ ] Automatic parameter application (with safeguards)
-- [ ] Email/Slack notifications of parameter changes
-- [ ] A/B testing framework for parameter validation
-
 ## Questions?
 
 Review the generated reports in `data/strategy-tuning/` for detailed analysis and insights.
+
+Query the database for configuration history:
+```sql
+SELECT * FROM trading_config ORDER BY start_date DESC;
+```
