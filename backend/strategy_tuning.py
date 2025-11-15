@@ -749,10 +749,11 @@ class StrategyTuner:
             start_date, end_date
         )
 
-        # 7. Save parameters to database with start date = first day of next month
+        # 7. Save parameters to database with start date = first day of current month
         # User will run this script on the first trading day of the month
-        # So we set start date to today (first trading day of the month)
-        next_config_start_date = date.today()
+        # So we set start date to first day of the current month (not today)
+        today = date.today()
+        next_config_start_date = date(today.year, today.month, 1)  # First day of current month
         self.save_parameters(new_params, report_path, next_config_start_date)
 
         print(f"\n{'='*80}")
