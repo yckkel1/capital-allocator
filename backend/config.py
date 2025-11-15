@@ -35,6 +35,7 @@ class Settings(BaseSettings):
         # This will look for .env, .env.local, or .env.production
         env_file = ".env"
         case_sensitive = False
+        protected_namespaces = ('settings_',)  # Avoid conflict with model_type field
 
 
 @lru_cache()
