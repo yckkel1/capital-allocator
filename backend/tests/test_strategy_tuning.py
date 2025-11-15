@@ -39,6 +39,38 @@ class TestTradeEvaluation:
         assert eval.was_profitable is True
         assert eval.score == 0.5
 
+    def test_trade_evaluation_with_enhanced_fields(self):
+        """Test creating a trade evaluation with enhanced fields"""
+        from strategy_tuning import TradeEvaluation
+
+        eval = TradeEvaluation(
+            trade_date=date(2025, 11, 15),
+            symbol='SPY',
+            action='BUY',
+            amount=400.0,
+            regime='bullish',
+            market_condition='momentum',
+            contribution_to_drawdown=5.0,
+            sharpe_impact=0.1,
+            was_profitable=True,
+            pnl=10.5,
+            score=0.5,
+            should_have_avoided=False,
+            pnl_10d=8.0,
+            pnl_20d=10.5,
+            pnl_30d=12.0,
+            best_horizon='30d',
+            confidence_bucket='high',
+            signal_type='bullish_momentum'
+        )
+
+        assert eval.pnl_10d == 8.0
+        assert eval.pnl_20d == 10.5
+        assert eval.pnl_30d == 12.0
+        assert eval.best_horizon == '30d'
+        assert eval.confidence_bucket == 'high'
+        assert eval.signal_type == 'bullish_momentum'
+
 
 class TestStrategyTunerInit:
     """Test StrategyTuner initialization"""
@@ -439,6 +471,298 @@ class TestTuneParameters:
 
         # Should tighten risk controls
         assert new_params.risk_high_threshold < current_config.risk_high_threshold
+
+
+class TestAnalyzeConfidenceBuckets:
+    """Test analyze_confidence_buckets method"""
+
+    @patch('strategy_tuning.ConfigLoader')
+    @patch('strategy_tuning.psycopg2.connect')
+    @patch('strategy_tuning.get_settings')
+    def test_analyze_confidence_buckets(self, mock_get_settings, mock_connect, mock_config_loader):
+        """Test performance analysis by confidence bucket"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+        mock_connect.return_value = MagicMock()
+
+        mock_loader = Mock()
+        mock_loader.get_active_config.return_value = Mock()
+        mock_config_loader.return_value = mock_loader
+
+        from strategy_tuning import StrategyTuner, TradeEvaluation
+
+        tuner = StrategyTuner()
+
+        evaluations = [
+            TradeEvaluation(
+                trade_date=date(2025, 11, 1), symbol='SPY', action='BUY',
+                amount=400.0, regime='bullish', market_condition='momentum',
+                contribution_to_drawdown=5.0, sharpe_impact=0.1,
+                was_profitable=True, pnl=15.0,
+                pnl_10d=10.0, pnl_20d=15.0, pnl_30d=12.0,
+                best_horizon='20d', confidence_bucket='high',
+                signal_type='bullish_momentum', score=0.5, should_have_avoided=False
+            ),
+            TradeEvaluation(
+                trade_date=date(2025, 11, 2), symbol='QQQ', action='BUY',
+                amount=300.0, regime='neutral', market_condition='choppy',
+                contribution_to_drawdown=25.0, sharpe_impact=-0.1,
+                was_profitable=False, pnl=-15.0,
+                pnl_10d=-10.0, pnl_20d=-15.0, pnl_30d=-12.0,
+                best_horizon='30d', confidence_bucket='low',
+                signal_type='neutral_cautious', score=-0.3, should_have_avoided=True
+            )
+        ]
+
+        analysis = tuner.analyze_confidence_buckets(evaluations)
+
+        assert 'high' in analysis
+        assert 'medium' in analysis
+        assert 'low' in analysis
+        assert analysis['high']['count'] == 1
+        assert analysis['low']['count'] == 1
+        assert analysis['high']['win_rate'] == 100.0
+        assert analysis['low']['win_rate'] == 0.0
+
+    @patch('strategy_tuning.ConfigLoader')
+    @patch('strategy_tuning.psycopg2.connect')
+    @patch('strategy_tuning.get_settings')
+    def test_analyze_confidence_buckets_empty(self, mock_get_settings, mock_connect, mock_config_loader):
+        """Test confidence bucket analysis with no trades"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+        mock_connect.return_value = MagicMock()
+
+        mock_loader = Mock()
+        mock_loader.get_active_config.return_value = Mock()
+        mock_config_loader.return_value = mock_loader
+
+        from strategy_tuning import StrategyTuner
+
+        tuner = StrategyTuner()
+        analysis = tuner.analyze_confidence_buckets([])
+
+        assert analysis['high']['count'] == 0
+        assert analysis['medium']['count'] == 0
+        assert analysis['low']['count'] == 0
+
+
+class TestAnalyzeSignalTypes:
+    """Test analyze_signal_types method"""
+
+    @patch('strategy_tuning.ConfigLoader')
+    @patch('strategy_tuning.psycopg2.connect')
+    @patch('strategy_tuning.get_settings')
+    def test_analyze_signal_types(self, mock_get_settings, mock_connect, mock_config_loader):
+        """Test performance analysis by signal type"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+        mock_connect.return_value = MagicMock()
+
+        mock_loader = Mock()
+        mock_loader.get_active_config.return_value = Mock()
+        mock_config_loader.return_value = mock_loader
+
+        from strategy_tuning import StrategyTuner, TradeEvaluation
+
+        tuner = StrategyTuner()
+
+        evaluations = [
+            TradeEvaluation(
+                trade_date=date(2025, 11, 1), symbol='SPY', action='BUY',
+                amount=400.0, regime='bullish', market_condition='momentum',
+                contribution_to_drawdown=5.0, sharpe_impact=0.1,
+                was_profitable=True, pnl=15.0,
+                signal_type='bullish_momentum', score=0.5, should_have_avoided=False
+            ),
+            TradeEvaluation(
+                trade_date=date(2025, 11, 2), symbol='QQQ', action='BUY',
+                amount=300.0, regime='neutral', market_condition='choppy',
+                contribution_to_drawdown=5.0, sharpe_impact=0.15,
+                was_profitable=True, pnl=10.0,
+                signal_type='mean_reversion_oversold', score=0.4, should_have_avoided=False
+            )
+        ]
+
+        analysis = tuner.analyze_signal_types(evaluations)
+
+        assert 'bullish_momentum' in analysis
+        assert 'mean_reversion_oversold' in analysis
+        assert analysis['bullish_momentum']['count'] == 1
+        assert analysis['mean_reversion_oversold']['count'] == 1
+        assert analysis['bullish_momentum']['win_rate'] == 100.0
+
+
+class TestOutOfSampleValidation:
+    """Test out-of-sample validation"""
+
+    @patch('strategy_tuning.ConfigLoader')
+    @patch('strategy_tuning.psycopg2.connect')
+    @patch('strategy_tuning.get_settings')
+    def test_validation_passes(self, mock_get_settings, mock_connect, mock_config_loader):
+        """Test validation passes with good metrics"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+
+        # Mock performance metrics for test period
+        mock_cursor.fetchall.return_value = [
+            {'date': date(2025, 11, 1), 'total_value': 10000.0},
+            {'date': date(2025, 11, 2), 'total_value': 10100.0},
+            {'date': date(2025, 11, 3), 'total_value': 10200.0},
+        ]
+
+        from config_loader import TradingConfig
+        mock_loader = Mock()
+        current_config = TradingConfig(
+            daily_capital=1000.0, assets=["SPY", "QQQ", "DIA"],
+            lookback_days=252, regime_bullish_threshold=0.3,
+            regime_bearish_threshold=-0.3, risk_high_threshold=70.0,
+            risk_medium_threshold=40.0, allocation_low_risk=0.8,
+            allocation_medium_risk=0.5, allocation_high_risk=0.3,
+            allocation_neutral=0.2, sell_percentage=0.7,
+            momentum_weight=0.6, price_momentum_weight=0.4,
+            max_drawdown_tolerance=15.0, min_sharpe_target=1.0
+        )
+        mock_loader.get_active_config.return_value = current_config
+        mock_config_loader.return_value = mock_loader
+
+        from strategy_tuning import StrategyTuner
+
+        tuner = StrategyTuner()
+        result = tuner.perform_out_of_sample_validation(
+            current_config,
+            (date(2025, 10, 1), date(2025, 10, 20)),
+            (date(2025, 10, 21), date(2025, 11, 15))
+        )
+
+        assert 'passes_validation' in result
+        assert 'validation_score' in result
+        assert 'test_sharpe' in result
+        assert 'test_max_drawdown' in result
+
+
+class TestTuneParametersEnhanced:
+    """Test enhanced tune_parameters method"""
+
+    @patch('strategy_tuning.ConfigLoader')
+    @patch('strategy_tuning.psycopg2.connect')
+    @patch('strategy_tuning.get_settings')
+    def test_tune_confidence_threshold(self, mock_get_settings, mock_connect, mock_config_loader):
+        """Test tuning of confidence threshold based on low confidence performance"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+        mock_connect.return_value = MagicMock()
+
+        from config_loader import TradingConfig
+        mock_loader = Mock()
+        current_config = TradingConfig(
+            daily_capital=1000.0, assets=["SPY", "QQQ", "DIA"],
+            lookback_days=252, regime_bullish_threshold=0.3,
+            regime_bearish_threshold=-0.3, risk_high_threshold=70.0,
+            risk_medium_threshold=40.0, allocation_low_risk=0.8,
+            allocation_medium_risk=0.5, allocation_high_risk=0.3,
+            allocation_neutral=0.2, sell_percentage=0.7,
+            momentum_weight=0.6, price_momentum_weight=0.4,
+            max_drawdown_tolerance=15.0, min_sharpe_target=1.0,
+            min_confidence_threshold=0.3, confidence_scaling_factor=0.5
+        )
+        mock_loader.get_active_config.return_value = current_config
+        mock_config_loader.return_value = mock_loader
+
+        from strategy_tuning import StrategyTuner
+
+        tuner = StrategyTuner()
+
+        condition_analysis = {
+            'momentum': {'should_be_more_aggressive': False, 'should_be_more_conservative': False},
+            'choppy': {'should_be_more_aggressive': False, 'should_be_more_conservative': False},
+            'overall': {}
+        }
+
+        overall_metrics = {
+            'sharpe_ratio': 1.2,
+            'max_drawdown': 10.0
+        }
+
+        # Low confidence trades performing poorly
+        confidence_analysis = {
+            'high': {'count': 5, 'win_rate': 75.0},
+            'medium': {'count': 10, 'win_rate': 55.0},
+            'low': {'count': 8, 'win_rate': 35.0}  # Poor performance
+        }
+
+        new_params = tuner.tune_parameters(
+            [], condition_analysis, overall_metrics,
+            confidence_analysis, None
+        )
+
+        # Should increase minimum confidence threshold
+        assert new_params.min_confidence_threshold > current_config.min_confidence_threshold
+
+    @patch('strategy_tuning.ConfigLoader')
+    @patch('strategy_tuning.psycopg2.connect')
+    @patch('strategy_tuning.get_settings')
+    def test_tune_mean_reversion_allocation(self, mock_get_settings, mock_connect, mock_config_loader):
+        """Test tuning of mean reversion allocation"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+        mock_connect.return_value = MagicMock()
+
+        from config_loader import TradingConfig
+        mock_loader = Mock()
+        current_config = TradingConfig(
+            daily_capital=1000.0, assets=["SPY", "QQQ", "DIA"],
+            lookback_days=252, regime_bullish_threshold=0.3,
+            regime_bearish_threshold=-0.3, risk_high_threshold=70.0,
+            risk_medium_threshold=40.0, allocation_low_risk=0.8,
+            allocation_medium_risk=0.5, allocation_high_risk=0.3,
+            allocation_neutral=0.2, sell_percentage=0.7,
+            momentum_weight=0.6, price_momentum_weight=0.4,
+            max_drawdown_tolerance=15.0, min_sharpe_target=1.0,
+            mean_reversion_allocation=0.4
+        )
+        mock_loader.get_active_config.return_value = current_config
+        mock_config_loader.return_value = mock_loader
+
+        from strategy_tuning import StrategyTuner
+
+        tuner = StrategyTuner()
+
+        condition_analysis = {
+            'momentum': {'should_be_more_aggressive': False, 'should_be_more_conservative': False},
+            'choppy': {'should_be_more_aggressive': False, 'should_be_more_conservative': False},
+            'overall': {}
+        }
+
+        overall_metrics = {
+            'sharpe_ratio': 1.2,
+            'max_drawdown': 10.0
+        }
+
+        # Mean reversion signals performing well
+        signal_type_analysis = {
+            'mean_reversion_oversold': {'count': 10, 'win_rate': 65.0},
+            'bullish_momentum': {'count': 20, 'win_rate': 55.0}
+        }
+
+        new_params = tuner.tune_parameters(
+            [], condition_analysis, overall_metrics,
+            None, signal_type_analysis
+        )
+
+        # Should increase mean reversion allocation
+        assert new_params.mean_reversion_allocation > current_config.mean_reversion_allocation
 
 
 class TestMainFunction:

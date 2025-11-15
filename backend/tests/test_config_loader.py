@@ -112,6 +112,135 @@ class TestTradingConfig:
         assert config.created_by == 'test'
         assert config.notes == 'test notes'
 
+    def test_from_db_row_with_enhanced_fields(self):
+        """Test creating config from database row with enhanced fields"""
+        mock_row = {
+            'id': 2,
+            'start_date': date(2025, 11, 1),
+            'end_date': None,
+            'daily_capital': 1000.0,
+            'assets': ["SPY", "QQQ", "DIA"],
+            'lookback_days': 252,
+            'regime_bullish_threshold': 0.3,
+            'regime_bearish_threshold': -0.3,
+            'risk_high_threshold': 70.0,
+            'risk_medium_threshold': 40.0,
+            'allocation_low_risk': 0.8,
+            'allocation_medium_risk': 0.5,
+            'allocation_high_risk': 0.3,
+            'allocation_neutral': 0.2,
+            'sell_percentage': 0.7,
+            'momentum_weight': 0.6,
+            'price_momentum_weight': 0.4,
+            'max_drawdown_tolerance': 15.0,
+            'min_sharpe_target': 1.0,
+            # Enhanced fields
+            'rsi_oversold_threshold': 25.0,
+            'rsi_overbought_threshold': 75.0,
+            'bollinger_std_multiplier': 2.5,
+            'mean_reversion_allocation': 0.45,
+            'volatility_adjustment_factor': 0.35,
+            'base_volatility': 0.012,
+            'min_confidence_threshold': 0.35,
+            'confidence_scaling_factor': 0.6,
+            'intramonth_drawdown_limit': 0.08,
+            'circuit_breaker_reduction': 0.6,
+            'created_by': 'tuning',
+            'notes': 'enhanced config'
+        }
+
+        config = TradingConfig.from_db_row(mock_row)
+
+        assert config.rsi_oversold_threshold == 25.0
+        assert config.rsi_overbought_threshold == 75.0
+        assert config.bollinger_std_multiplier == 2.5
+        assert config.mean_reversion_allocation == 0.45
+        assert config.volatility_adjustment_factor == 0.35
+        assert config.base_volatility == 0.012
+        assert config.min_confidence_threshold == 0.35
+        assert config.confidence_scaling_factor == 0.6
+        assert config.intramonth_drawdown_limit == 0.08
+        assert config.circuit_breaker_reduction == 0.6
+
+    def test_from_db_row_with_defaults_for_missing_enhanced_fields(self):
+        """Test that missing enhanced fields use defaults"""
+        mock_row = {
+            'id': 3,
+            'start_date': date(2025, 11, 1),
+            'end_date': None,
+            'daily_capital': 1000.0,
+            'assets': ["SPY", "QQQ", "DIA"],
+            'lookback_days': 252,
+            'regime_bullish_threshold': 0.3,
+            'regime_bearish_threshold': -0.3,
+            'risk_high_threshold': 70.0,
+            'risk_medium_threshold': 40.0,
+            'allocation_low_risk': 0.8,
+            'allocation_medium_risk': 0.5,
+            'allocation_high_risk': 0.3,
+            'allocation_neutral': 0.2,
+            'sell_percentage': 0.7,
+            'momentum_weight': 0.6,
+            'price_momentum_weight': 0.4,
+            'max_drawdown_tolerance': 15.0,
+            'min_sharpe_target': 1.0,
+            'created_by': 'old_system',
+            'notes': None
+            # Missing enhanced fields - should use defaults
+        }
+
+        config = TradingConfig.from_db_row(mock_row)
+
+        # Should use default values
+        assert config.rsi_oversold_threshold == 30.0
+        assert config.rsi_overbought_threshold == 70.0
+        assert config.bollinger_std_multiplier == 2.0
+        assert config.mean_reversion_allocation == 0.4
+        assert config.volatility_adjustment_factor == 0.4
+        assert config.base_volatility == 0.01
+        assert config.min_confidence_threshold == 0.3
+        assert config.confidence_scaling_factor == 0.5
+        assert config.intramonth_drawdown_limit == 0.10
+        assert config.circuit_breaker_reduction == 0.5
+
+    def test_create_config_with_enhanced_fields(self):
+        """Test creating a config with enhanced fields"""
+        config = TradingConfig(
+            daily_capital=1000.0,
+            assets=["SPY", "QQQ", "DIA"],
+            lookback_days=252,
+            regime_bullish_threshold=0.3,
+            regime_bearish_threshold=-0.3,
+            risk_high_threshold=70.0,
+            risk_medium_threshold=40.0,
+            allocation_low_risk=0.8,
+            allocation_medium_risk=0.5,
+            allocation_high_risk=0.3,
+            allocation_neutral=0.2,
+            sell_percentage=0.7,
+            momentum_weight=0.6,
+            price_momentum_weight=0.4,
+            max_drawdown_tolerance=15.0,
+            min_sharpe_target=1.0,
+            # Enhanced fields
+            rsi_oversold_threshold=28.0,
+            rsi_overbought_threshold=72.0,
+            bollinger_std_multiplier=2.2,
+            mean_reversion_allocation=0.35,
+            volatility_adjustment_factor=0.45,
+            base_volatility=0.015,
+            min_confidence_threshold=0.4,
+            confidence_scaling_factor=0.55,
+            intramonth_drawdown_limit=0.12,
+            circuit_breaker_reduction=0.45
+        )
+
+        assert config.rsi_oversold_threshold == 28.0
+        assert config.rsi_overbought_threshold == 72.0
+        assert config.bollinger_std_multiplier == 2.2
+        assert config.mean_reversion_allocation == 0.35
+        assert config.intramonth_drawdown_limit == 0.12
+
     def test_to_dict_serializes_dates(self):
         """Test that dates are properly serialized in to_dict"""
         config = TradingConfig(
