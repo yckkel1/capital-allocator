@@ -2,16 +2,73 @@
 Shared pytest fixtures for all test modules.
 Provides mock data, database sessions, and common test utilities.
 """
+import os
+import sys
+from unittest.mock import MagicMock, patch
+
+# CRITICAL: Set environment variables BEFORE any other imports
+# This must happen before any module tries to load Settings
+os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/testdb")
+os.environ.setdefault("ALPHAVANTAGE_API_KEY", "TEST_API_KEY")
+os.environ.setdefault("API_TITLE", "Capital Allocator API")
+os.environ.setdefault("API_VERSION", "1.0.0")
+os.environ.setdefault("MODEL_TYPE", "momentum")
+os.environ.setdefault("MARKET_CLOSE_TIME", "16:30")
+os.environ.setdefault("SIGNAL_GENERATION_TIME", "06:00")
+
+# Add parent directory to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# CRITICAL: Mock SQLAlchemy engine creation BEFORE database.py is imported
+# This prevents actual database connection attempts while keeping models functional
+_mock_engine = MagicMock()
+_mock_engine.url = "postgresql://test:test@localhost:5432/testdb"
+
+# Only mock create_engine, not sessionmaker or declarative_base
+# This allows models to be defined properly
+_engine_patch = patch('sqlalchemy.create_engine', return_value=_mock_engine)
+_engine_patch.start()
+
+# CRITICAL: Mock psycopg2.connect to prevent database connections
+# This is needed for config_loader.py which uses psycopg2 directly
+_mock_psycopg2_conn = MagicMock()
+_mock_psycopg2_cursor = MagicMock()
+_mock_psycopg2_conn.cursor.return_value = _mock_psycopg2_cursor
+
+# Mock the cursor to return a default config
+from datetime import date as _date
+_mock_psycopg2_cursor.fetchone.return_value = {
+    'id': 1,
+    'start_date': _date(2025, 11, 1),
+    'end_date': None,
+    'daily_capital': 1000.0,
+    'assets': '["SPY", "QQQ", "DIA"]',
+    'lookback_days': 252,
+    'regime_bullish_threshold': 0.3,
+    'regime_bearish_threshold': -0.3,
+    'risk_high_threshold': 70.0,
+    'risk_medium_threshold': 40.0,
+    'allocation_low_risk': 0.8,
+    'allocation_medium_risk': 0.5,
+    'allocation_high_risk': 0.3,
+    'allocation_neutral': 0.2,
+    'sell_percentage': 0.7,
+    'momentum_weight': 0.6,
+    'price_momentum_weight': 0.4,
+    'max_drawdown_tolerance': 15.0,
+    'min_sharpe_target': 1.0,
+    'created_by': 'test',
+    'notes': 'Test configuration'
+}
+
+_psycopg2_patch = patch('psycopg2.connect', return_value=_mock_psycopg2_conn)
+_psycopg2_patch.start()
+
 import pytest
 from unittest.mock import Mock, MagicMock, patch, PropertyMock
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 import json
-import os
-import sys
-
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 @pytest.fixture

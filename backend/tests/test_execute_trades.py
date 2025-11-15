@@ -453,6 +453,309 @@ class TestUpdatePortfolio:
         mock_conn.commit.assert_called_once()
 
 
+class TestExecuteSellTrades:
+    """Test execute_sell_trades method"""
+
+    @patch('execute_trades.psycopg2.connect')
+    @patch('execute_trades.get_settings')
+    def test_execute_sell_trades_with_positions(self, mock_get_settings, mock_connect):
+        """Test executing sell trades when positions exist"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+
+        # Mock positions and prices
+        mock_cursor.fetchall.return_value = [
+            {'symbol': 'SPY', 'total_quantity': 2.0, 'avg_cost': 575.0, 'total_cost': 1150.0}
+        ]
+        mock_cursor.fetchone.return_value = {'open_price': 580.0}
+
+        from execute_trades import TradeExecutor
+
+        executor = TradeExecutor()
+
+        signal = {
+            'features_used': {
+                'assets': {
+                    'SPY': {'score': -1.5}  # Negative score triggers sell
+                }
+            }
+        }
+
+        trades = executor.execute_sell_trades(signal, 1, '2025-11-15')
+
+        # Should have executed sell
+        assert len(trades) == 1
+        assert trades[0]['side'] == 'SELL'
+        assert trades[0]['symbol'] == 'SPY'
+        mock_conn.commit.assert_called_once()
+
+    @patch('execute_trades.psycopg2.connect')
+    @patch('execute_trades.get_settings')
+    def test_execute_sell_trades_no_positions(self, mock_get_settings, mock_connect):
+        """Test sell trades when no positions exist"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor.fetchall.return_value = []  # No positions
+
+        from execute_trades import TradeExecutor
+
+        executor = TradeExecutor()
+
+        signal = {
+            'features_used': {
+                'assets': {}
+            }
+        }
+
+        trades = executor.execute_sell_trades(signal, 1, '2025-11-15')
+
+        assert len(trades) == 0
+
+    @patch('execute_trades.psycopg2.connect')
+    @patch('execute_trades.get_settings')
+    def test_execute_sell_trades_positive_score_no_sell(self, mock_get_settings, mock_connect):
+        """Test that positive scores don't trigger sells"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+
+        mock_cursor.fetchall.return_value = [
+            {'symbol': 'SPY', 'total_quantity': 2.0, 'avg_cost': 575.0, 'total_cost': 1150.0}
+        ]
+
+        from execute_trades import TradeExecutor
+
+        executor = TradeExecutor()
+
+        signal = {
+            'features_used': {
+                'assets': {
+                    'SPY': {'score': 2.5}  # Positive score
+                }
+            }
+        }
+
+        trades = executor.execute_sell_trades(signal, 1, '2025-11-15')
+
+        # Positive score should not sell
+        assert len(trades) == 0
+
+
+class TestRunMethod:
+    """Test TradeExecutor.run method"""
+
+    @patch('execute_trades.get_trading_config')
+    @patch('execute_trades.psycopg2.connect')
+    @patch('execute_trades.get_settings')
+    def test_run_buy_action(self, mock_get_settings, mock_connect, mock_get_config):
+        """Test run method with BUY action"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+
+        # Mock trading config
+        mock_config = Mock()
+        mock_config.id = 1
+        mock_config.daily_capital = 1000.0
+        mock_get_config.return_value = mock_config
+
+        # Mock signal
+        mock_cursor.fetchone.side_effect = [
+            # get_latest_signal
+            {
+                'id': 1,
+                'trade_date': date(2025, 11, 15),
+                'allocations': {'SPY': 400.0},
+                'features_used': {
+                    'action': 'BUY',
+                    'allocation_pct': 0.8,
+                    'assets': {'SPY': {'score': 3.0}}
+                }
+            },
+            # get_opening_price for SPY
+            {'open_price': 580.0},
+            # update_portfolio check for existing position
+            None
+        ]
+
+        # Mock positions (empty initially)
+        mock_cursor.fetchall.side_effect = [
+            [],  # get_current_positions
+            []   # current prices query
+        ]
+
+        from execute_trades import TradeExecutor
+
+        executor = TradeExecutor()
+        executor.run('2025-11-15')
+
+        # Should have executed buy trades
+        mock_conn.commit.assert_called()
+
+    @patch('execute_trades.get_trading_config')
+    @patch('execute_trades.psycopg2.connect')
+    @patch('execute_trades.get_settings')
+    def test_run_hold_action(self, mock_get_settings, mock_connect, mock_get_config):
+        """Test run method with HOLD action"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.id = 1
+        mock_config.daily_capital = 1000.0
+        mock_get_config.return_value = mock_config
+
+        mock_cursor.fetchone.return_value = {
+            'id': 1,
+            'trade_date': date(2025, 11, 15),
+            'allocations': {},
+            'features_used': {
+                'action': 'HOLD',
+                'allocation_pct': 0.0,
+                'assets': {}
+            }
+        }
+
+        mock_cursor.fetchall.side_effect = [
+            [],  # get_current_positions
+            []   # current prices
+        ]
+
+        from execute_trades import TradeExecutor
+
+        executor = TradeExecutor()
+        executor.run('2025-11-15')
+
+        # HOLD should not execute any trades
+        mock_get_config.assert_called_once()
+
+    @patch('execute_trades.get_trading_config')
+    @patch('execute_trades.psycopg2.connect')
+    @patch('execute_trades.get_settings')
+    def test_run_sell_action(self, mock_get_settings, mock_connect, mock_get_config):
+        """Test run method with SELL action"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.id = 1
+        mock_config.daily_capital = 1000.0
+        mock_get_config.return_value = mock_config
+
+        mock_cursor.fetchone.side_effect = [
+            # get_latest_signal
+            {
+                'id': 1,
+                'trade_date': date(2025, 11, 15),
+                'allocations': {},
+                'features_used': {
+                    'action': 'SELL',
+                    'allocation_pct': 0.7,
+                    'assets': {'SPY': {'score': -2.0}}
+                }
+            },
+            # get_opening_price
+            {'open_price': 580.0},
+            # update_portfolio check for existing position
+            {'quantity': 2.0, 'avg_cost': 575.0}
+        ]
+
+        mock_cursor.fetchall.side_effect = [
+            # get_current_positions (twice - once for display, once for sell)
+            [{'symbol': 'SPY', 'total_quantity': 2.0, 'avg_cost': 575.0, 'total_cost': 1150.0}],
+            # current prices
+            [{'symbol': 'SPY', 'close_price': 580.0}],
+            # get_current_positions for sell
+            [{'symbol': 'SPY', 'total_quantity': 2.0, 'avg_cost': 575.0, 'total_cost': 1150.0}]
+        ]
+
+        from execute_trades import TradeExecutor
+
+        executor = TradeExecutor()
+        executor.run('2025-11-15')
+
+        mock_conn.commit.assert_called()
+
+    @patch('execute_trades.get_trading_config')
+    @patch('execute_trades.psycopg2.connect')
+    @patch('execute_trades.get_settings')
+    def test_run_with_existing_positions(self, mock_get_settings, mock_connect, mock_get_config):
+        """Test run method showing existing portfolio"""
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test"
+        mock_get_settings.return_value = mock_settings
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_connect.return_value = mock_conn
+        mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.id = 1
+        mock_config.daily_capital = 1000.0
+        mock_get_config.return_value = mock_config
+
+        mock_cursor.fetchone.return_value = {
+            'id': 1,
+            'trade_date': date(2025, 11, 15),
+            'allocations': {},
+            'features_used': {
+                'action': 'HOLD',
+                'allocation_pct': 0.0,
+                'assets': {}
+            }
+        }
+
+        mock_cursor.fetchall.side_effect = [
+            # get_current_positions with existing holdings
+            [{'symbol': 'SPY', 'total_quantity': 1.5, 'avg_cost': 575.0, 'total_cost': 862.5}],
+            # current prices
+            [{'symbol': 'SPY', 'close_price': 590.0}]
+        ]
+
+        from execute_trades import TradeExecutor
+
+        executor = TradeExecutor()
+        executor.run('2025-11-15')
+
+        # Should display portfolio info
+        mock_get_config.assert_called_once()
+
+
 class TestMainFunction:
     """Test main entry point"""
 
@@ -485,6 +788,20 @@ class TestMainFunction:
             result = main()
 
         assert result == 1
+
+    @patch('execute_trades.TradeExecutor')
+    def test_main_no_date_argument(self, mock_executor_class):
+        """Test main function without date argument"""
+        mock_executor = Mock()
+        mock_executor_class.return_value = mock_executor
+
+        from execute_trades import main
+
+        with patch('sys.argv', ['execute_trades.py']):
+            result = main()
+
+        assert result == 0
+        mock_executor.run.assert_called_once_with(None)
 
 
 if __name__ == '__main__':

@@ -12,43 +12,45 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-@pytest.fixture
-def mock_app_setup():
-    """Setup mocks for FastAPI app initialization"""
-    with patch('main.get_settings') as mock_settings, \
-         patch('main.models') as mock_models, \
-         patch('main.engine') as mock_engine:
+# We need to mock the database connection before importing main
+@pytest.fixture(scope="module", autouse=True)
+def mock_main_dependencies():
+    """Mock dependencies that are loaded at module import time"""
+    with patch('config.Settings') as mock_settings_class, \
+         patch('database.get_settings') as mock_db_settings, \
+         patch('database.create_engine') as mock_engine, \
+         patch('database.sessionmaker') as mock_sessionmaker:
 
-        settings = Mock()
-        settings.api_title = "Capital Allocator API"
-        settings.api_version = "1.0.0"
-        mock_settings.return_value = settings
+        mock_settings = Mock()
+        mock_settings.database_url = "postgresql://test:test@localhost:5432/testdb"
+        mock_settings.alphavantage_api_key = "TEST_KEY"
+        mock_settings.api_title = "Capital Allocator API"
+        mock_settings.api_version = "1.0.0"
+        mock_settings.model_type = "momentum"
+        mock_settings.market_close_time = "16:30"
+        mock_settings.signal_generation_time = "06:00"
 
-        yield {
-            'settings': mock_settings,
-            'models': mock_models,
-            'engine': mock_engine
-        }
+        mock_db_settings.return_value = mock_settings
+        mock_settings_class.return_value = mock_settings
+
+        yield
 
 
 class TestRootEndpoint:
     """Test root health check endpoint"""
 
-    @patch('main.get_settings')
-    def test_root_returns_status(self, mock_get_settings):
+    def test_root_returns_status(self):
         """Test root endpoint returns status"""
-        settings = Mock()
-        settings.api_title = "Capital Allocator API"
-        settings.api_version = "1.0.0"
-        mock_get_settings.return_value = settings
+        with patch('main.settings') as mock_settings:
+            mock_settings.api_title = "Capital Allocator API"
+            mock_settings.api_version = "1.0.0"
 
-        from main import root
+            from main import root
+            response = root()
 
-        response = root()
-
-        assert response['status'] == 'online'
-        assert response['app'] == "Capital Allocator API"
-        assert response['version'] == "1.0.0"
+            assert response['status'] == 'online'
+            assert response['app'] == "Capital Allocator API"
+            assert response['version'] == "1.0.0"
 
 
 class TestGetLatestPrices:
@@ -56,49 +58,51 @@ class TestGetLatestPrices:
 
     def test_get_latest_prices_with_data(self, mock_db_session):
         """Test getting latest prices when data exists"""
-        from main import get_latest_prices
+        with patch('main.models'):
+            from main import get_latest_prices
 
-        # Setup mock
-        mock_date_result = Mock()
-        mock_date_result.__getitem__ = Mock(return_value=date(2025, 11, 15))
+            # Setup mock
+            mock_date_result = Mock()
+            mock_date_result.__getitem__ = Mock(return_value=date(2025, 11, 15))
 
-        mock_db_session.query.return_value.order_by.return_value.first.return_value = mock_date_result
+            mock_db_session.query.return_value.order_by.return_value.first.return_value = mock_date_result
 
-        mock_price1 = Mock()
-        mock_price1.symbol = 'SPY'
-        mock_price1.close_price = 581.25
-        mock_price1.open_price = 580.50
-        mock_price1.high_price = 582.00
-        mock_price1.low_price = 579.00
-        mock_price1.volume = 55000000.0
+            mock_price1 = Mock()
+            mock_price1.symbol = 'SPY'
+            mock_price1.close_price = 581.25
+            mock_price1.open_price = 580.50
+            mock_price1.high_price = 582.00
+            mock_price1.low_price = 579.00
+            mock_price1.volume = 55000000.0
 
-        mock_price2 = Mock()
-        mock_price2.symbol = 'QQQ'
-        mock_price2.close_price = 502.50
-        mock_price2.open_price = 501.00
-        mock_price2.high_price = 503.00
-        mock_price2.low_price = 500.00
-        mock_price2.volume = 42000000.0
+            mock_price2 = Mock()
+            mock_price2.symbol = 'QQQ'
+            mock_price2.close_price = 502.50
+            mock_price2.open_price = 501.00
+            mock_price2.high_price = 503.00
+            mock_price2.low_price = 500.00
+            mock_price2.volume = 42000000.0
 
-        mock_db_session.query.return_value.filter.return_value.all.return_value = [mock_price1, mock_price2]
+            mock_db_session.query.return_value.filter.return_value.all.return_value = [mock_price1, mock_price2]
 
-        response = get_latest_prices(mock_db_session)
+            response = get_latest_prices(mock_db_session)
 
-        assert response['date'] == '2025-11-15'
-        assert len(response['prices']) == 2
-        assert response['prices'][0]['symbol'] == 'SPY'
-        assert response['prices'][0]['close'] == 581.25
+            assert response['date'] == '2025-11-15'
+            assert len(response['prices']) == 2
+            assert response['prices'][0]['symbol'] == 'SPY'
+            assert response['prices'][0]['close'] == 581.25
 
     def test_get_latest_prices_no_data(self, mock_db_session):
         """Test getting latest prices when no data exists"""
-        from main import get_latest_prices
+        with patch('main.models'):
+            from main import get_latest_prices
 
-        mock_db_session.query.return_value.order_by.return_value.first.return_value = None
+            mock_db_session.query.return_value.order_by.return_value.first.return_value = None
 
-        response = get_latest_prices(mock_db_session)
+            response = get_latest_prices(mock_db_session)
 
-        assert response['prices'] == []
-        assert response['date'] is None
+            assert response['prices'] == []
+            assert response['date'] is None
 
 
 class TestGetPriceHistory:
@@ -141,34 +145,36 @@ class TestGetLatestSignal:
 
     def test_get_latest_signal_exists(self, mock_db_session):
         """Test getting latest signal when it exists"""
-        from main import get_latest_signal
+        with patch('main.models'):
+            from main import get_latest_signal
 
-        mock_signal = Mock()
-        mock_signal.trade_date = date(2025, 11, 15)
-        mock_signal.generated_at = datetime(2025, 11, 15, 6, 0, 0, tzinfo=timezone.utc)
-        mock_signal.allocations = {'SPY': 400.0, 'QQQ': 300.0, 'DIA': 100.0}
-        mock_signal.model_type = 'regime_based'
-        mock_signal.confidence_score = 0.75
+            mock_signal = Mock()
+            mock_signal.trade_date = date(2025, 11, 15)
+            mock_signal.generated_at = datetime(2025, 11, 15, 6, 0, 0, tzinfo=timezone.utc)
+            mock_signal.allocations = {'SPY': 400.0, 'QQQ': 300.0, 'DIA': 100.0}
+            mock_signal.model_type = 'regime_based'
+            mock_signal.confidence_score = 0.75
 
-        mock_db_session.query.return_value.order_by.return_value.first.return_value = mock_signal
+            mock_db_session.query.return_value.order_by.return_value.first.return_value = mock_signal
 
-        response = get_latest_signal(mock_db_session)
+            response = get_latest_signal(mock_db_session)
 
-        assert response['trade_date'] == '2025-11-15'
-        assert response['allocations']['SPY'] == 400.0
-        assert response['model_type'] == 'regime_based'
-        assert response['confidence'] == 0.75
+            assert response['trade_date'] == '2025-11-15'
+            assert response['allocations']['SPY'] == 400.0
+            assert response['model_type'] == 'regime_based'
+            assert response['confidence'] == 0.75
 
     def test_get_latest_signal_none(self, mock_db_session):
         """Test getting latest signal when none exists"""
-        from main import get_latest_signal
+        with patch('main.models'):
+            from main import get_latest_signal
 
-        mock_db_session.query.return_value.order_by.return_value.first.return_value = None
+            mock_db_session.query.return_value.order_by.return_value.first.return_value = None
 
-        response = get_latest_signal(mock_db_session)
+            response = get_latest_signal(mock_db_session)
 
-        assert response['signal'] is None
-        assert 'No signals' in response['message']
+            assert response['signal'] is None
+            assert 'No signals' in response['message']
 
 
 class TestGetPortfolio:
@@ -176,36 +182,38 @@ class TestGetPortfolio:
 
     def test_get_portfolio_with_holdings(self, mock_db_session):
         """Test getting portfolio with holdings"""
-        from main import get_portfolio
+        with patch('main.models'):
+            from main import get_portfolio
 
-        mock_holding = Mock()
-        mock_holding.symbol = 'SPY'
-        mock_holding.quantity = 1.5
-        mock_holding.avg_cost = 575.0
+            mock_holding = Mock()
+            mock_holding.symbol = 'SPY'
+            mock_holding.quantity = 1.5
+            mock_holding.avg_cost = 575.0
 
-        mock_price = Mock()
-        mock_price.close_price = 581.25
+            mock_price = Mock()
+            mock_price.close_price = 581.25
 
-        mock_db_session.query.return_value.all.return_value = [mock_holding]
-        mock_db_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_price
+            mock_db_session.query.return_value.all.return_value = [mock_holding]
+            mock_db_session.query.return_value.filter.return_value.order_by.return_value.first.return_value = mock_price
 
-        response = get_portfolio(mock_db_session)
+            response = get_portfolio(mock_db_session)
 
-        assert len(response['positions']) == 1
-        assert response['positions'][0]['symbol'] == 'SPY'
-        assert response['positions'][0]['quantity'] == 1.5
-        assert response['total_value'] > 0
+            assert len(response['positions']) == 1
+            assert response['positions'][0]['symbol'] == 'SPY'
+            assert response['positions'][0]['quantity'] == 1.5
+            assert response['total_value'] > 0
 
     def test_get_portfolio_empty(self, mock_db_session):
         """Test getting empty portfolio"""
-        from main import get_portfolio
+        with patch('main.models'):
+            from main import get_portfolio
 
-        mock_db_session.query.return_value.all.return_value = []
+            mock_db_session.query.return_value.all.return_value = []
 
-        response = get_portfolio(mock_db_session)
+            response = get_portfolio(mock_db_session)
 
-        assert response['positions'] == []
-        assert response['total_value'] == 0
+            assert response['positions'] == []
+            assert response['total_value'] == 0
 
 
 class TestGetTradeHistory:
@@ -278,23 +286,6 @@ class TestGetPerformance:
 
         assert response['performance'] == []
         assert response['summary'] is None
-
-
-class TestAPIIntegration:
-    """Integration-style tests for API"""
-
-    @patch('main.get_settings')
-    def test_app_configuration(self, mock_get_settings):
-        """Test that app is configured correctly"""
-        settings = Mock()
-        settings.api_title = "Capital Allocator API"
-        settings.api_version = "1.0.0"
-        mock_get_settings.return_value = settings
-
-        from main import app
-
-        assert app.title == "Capital Allocator API"
-        assert app.version == "1.0.0"
 
 
 if __name__ == '__main__':

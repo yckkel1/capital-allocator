@@ -85,7 +85,7 @@ class TestSettings:
 class TestGetTradingConfig:
     """Test get_trading_config function"""
 
-    @patch('config.get_active_trading_config')
+    @patch('config_loader.get_active_trading_config')
     def test_get_trading_config_no_date(self, mock_get_active):
         """Test getting trading config without date"""
         from config import get_trading_config
@@ -117,7 +117,7 @@ class TestGetTradingConfig:
         assert result.daily_capital == 1000.0
         assert result.assets == ["SPY", "QQQ", "DIA"]
 
-    @patch('config.get_active_trading_config')
+    @patch('config_loader.get_active_trading_config')
     def test_get_trading_config_with_date(self, mock_get_active):
         """Test getting trading config for specific date"""
         from config import get_trading_config
@@ -154,7 +154,7 @@ class TestGetTradingConfig:
         assert result.daily_capital == 900.0
         assert result.assets == ["SPY", "QQQ"]
 
-    @patch('config.get_active_trading_config')
+    @patch('config_loader.get_active_trading_config')
     def test_get_trading_config_propagates_error(self, mock_get_active):
         """Test that errors are propagated correctly"""
         from config import get_trading_config

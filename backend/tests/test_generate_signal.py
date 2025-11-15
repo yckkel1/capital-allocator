@@ -404,6 +404,28 @@ class TestGenerateSignalFunction:
         # Should not add new signal
         mock_db.add.assert_not_called()
 
+    @patch('scripts.generate_signal.SessionLocal')
+    @patch('scripts.generate_signal.get_trading_config')
+    def test_generate_signal_no_data_available(self, mock_config, mock_session):
+        """Test that signal generation handles no data gracefully"""
+        from scripts.generate_signal import generate_signal
+
+        mock_trading_config = Mock()
+        mock_trading_config.assets = ['SPY', 'QQQ', 'DIA']
+        mock_trading_config.lookback_days = 252
+        mock_trading_config.daily_capital = 1000.0
+        mock_config.return_value = mock_trading_config
+
+        mock_db = MagicMock()
+        mock_session.return_value = mock_db
+        mock_db.query.return_value.filter.return_value.first.return_value = None  # No signal
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []  # No data
+
+        generate_signal(date(2025, 11, 15))
+
+        # Should not add signal when no data available
+        mock_db.add.assert_not_called()
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
