@@ -14,9 +14,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import SessionLocal
 from models import PriceHistory, DailySignal, Portfolio
-from config import get_settings
+from config import get_settings, get_trading_config
 
 settings = get_settings()
+trading_config = get_trading_config()  # Load trading parameters from database
 
 
 def calculate_regime(features_by_asset: dict) -> float:
@@ -279,11 +280,11 @@ def generate_signal(trade_date: date = None):
             return
         
         # Fetch historical data for each asset
-        lookback_start = trade_date - timedelta(days=settings.lookback_days + 30)
-        
+        lookback_start = trade_date - timedelta(days=trading_config.lookback_days + 30)
+
         features_by_asset = {}
-        
-        for symbol in settings.assets:
+
+        for symbol in trading_config.assets:
             prices = db.query(PriceHistory).filter(
                 PriceHistory.symbol == symbol,
                 PriceHistory.date < trade_date,
@@ -351,7 +352,7 @@ def generate_signal(trade_date: date = None):
         
         if action == "BUY":
             # Diversified allocation
-            buy_amount = settings.daily_capital * allocation_pct
+            buy_amount = trading_config.daily_capital * allocation_pct
             allocations = allocate_diversified(asset_scores, buy_amount)
             
             print(f"\nBuy Allocations (Total: ${buy_amount:.2f}):")
@@ -359,7 +360,7 @@ def generate_signal(trade_date: date = None):
                 if amount > 0:
                     print(f"  {symbol}: ${amount:.2f} ({amount/buy_amount*100:.1f}%)")
             
-            cash_kept = settings.daily_capital - buy_amount
+            cash_kept = trading_config.daily_capital - buy_amount
             if cash_kept > 0:
                 print(f"  CASH: ${cash_kept:.2f}")
         
@@ -377,11 +378,11 @@ def generate_signal(trade_date: date = None):
                     allocations[symbol] = -allocation_pct  # Percentage to sell
                     print(f"  SELL {allocation_pct*100:.0f}% of {symbol} (score: {score:.4f})")
             else:
-                allocations = {s: 0.0 for s in settings.assets}
-        
+                allocations = {s: 0.0 for s in trading_config.assets}
+
         else:  # HOLD
-            allocations = {s: 0.0 for s in settings.assets}
-            print(f"\nHolding cash: ${settings.daily_capital:.2f}")
+            allocations = {s: 0.0 for s in trading_config.assets}
+            print(f"\nHolding cash: ${trading_config.daily_capital:.2f}")
         
         # Store signal
         signal = DailySignal(

@@ -17,13 +17,12 @@ from typing import Dict, List
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Import configuration
+from config import get_settings, get_trading_config
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-DAILY_BUDGET = Decimal("1000.00")  # Fresh capital each day
+settings = get_settings()
+DATABASE_URL = settings.database_url
 
 
 class TradeExecutor:
@@ -271,23 +270,30 @@ class TradeExecutor:
     def run(self, execution_date: str = None) -> None:
         """
         Main execution flow
-        
+
         Args:
             execution_date: Date to execute trades (YYYY-MM-DD). Uses today if not provided.
         """
         if not execution_date:
             execution_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-        
+
+        # Get trading configuration from database
+        from datetime import datetime as dt
+        exec_date_obj = dt.strptime(execution_date, '%Y-%m-%d').date()
+        trading_config = get_trading_config(exec_date_obj)
+        DAILY_BUDGET = Decimal(str(trading_config.daily_capital))
+
         print(f"\n{'='*60}")
         print(f"Trade Execution - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
         print(f"Execution Date: {execution_date}")
+        print(f"Daily Budget: ${DAILY_BUDGET:,.2f} (from config ID: {trading_config.id})")
         print(f"{'='*60}\n")
-        
+
         # 1. Get latest signal
         signal = self.get_latest_signal()
         action = signal['features_used']['action']
         allocation_pct = signal['features_used']['allocation_pct']
-        
+
         print(f"📊 Latest Signal (ID: {signal['id']}):")
         print(f"   Signal Date: {signal['trade_date']}")
         print(f"   Action: {action}")

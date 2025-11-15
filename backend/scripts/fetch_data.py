@@ -18,9 +18,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import SessionLocal
 from models import PriceHistory
-from config import get_settings
+from config import get_settings, get_trading_config
 
 settings = get_settings()
+trading_config = get_trading_config()  # Load trading parameters from database
 
 
 def fetch_and_store_prices(target_date: date = None):
@@ -41,7 +42,7 @@ def fetch_and_store_prices(target_date: date = None):
         # Initialize Alpha Vantage
         ts = TimeSeries(key=settings.alphavantage_api_key, output_format='pandas')
         
-        for symbol in settings.assets:
+        for symbol in trading_config.assets:
             print(f"  Fetching {symbol}...")
             
             # Check if data already exists
@@ -132,7 +133,7 @@ def backfill_historical_data(days: int = 365):
     """
     print(f"Backfilling historical data...")
     print(f"NOTE: Alpha Vantage free tier allows 5 calls/min, 25 calls/day")
-    print(f"This will take approximately {len(settings.assets) * 13} seconds for {len(settings.assets)} symbols\n")
+    print(f"This will take approximately {len(trading_config.assets) * 13} seconds for {len(trading_config.assets)} symbols\n")
     
     db = SessionLocal()
     
@@ -142,7 +143,7 @@ def backfill_historical_data(days: int = 365):
         ts = TimeSeries(key=settings.alphavantage_api_key, output_format='pandas')
         outputsize = 'full' if days > 100 else 'compact'
         
-        for symbol in settings.assets:
+        for symbol in trading_config.assets:
             print(f"Fetching {symbol}...")
             
             max_retries = 3
@@ -207,7 +208,7 @@ def backfill_historical_data(days: int = 365):
             print(f"  ✓ Added {count} records for {symbol}")
             
             # Sleep between symbols to respect rate limit (5 calls/min)
-            if symbol != settings.assets[-1]:  # Don't sleep after last symbol
+            if symbol != trading_config.assets[-1]:  # Don't sleep after last symbol
                 print(f"  Waiting 13 seconds for rate limit...\n")
                 time.sleep(13)
         

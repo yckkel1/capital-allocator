@@ -87,7 +87,7 @@ def show_parameter_diff():
         with open(json_path, 'r') as f:
             params = json.load(f)
 
-        print("Updated parameters are available in .env.dev")
+        print("Updated parameters have been saved to the database.")
         print("\nKey changes to review:")
         print(f"  • Bullish Threshold: {params.get('regime_bullish_threshold', 'N/A')}")
         print(f"  • Low Risk Allocation: {params.get('allocation_low_risk', 'N/A')}")
@@ -150,8 +150,8 @@ Examples:
         print(f"{'='*80}\n")
         print("📋 Next Steps:")
         print("  1. Review the tuning report in data/strategy-tuning/")
-        print("  2. Review parameter changes in .env.dev")
-        print("  3. Copy desired parameters from .env.dev to .env")
+        print("  2. New parameters are now active in the database")
+        print("  3. Query: SELECT * FROM trading_config WHERE end_date IS NULL;")
         print("  4. Optionally run backtest with new parameters to validate")
         print()
 

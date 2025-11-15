@@ -4,6 +4,11 @@ back-test/*.txt
 # Ignore analytics report files
 analytics/*.txt
 
+# Ignore strategy tuning report files
+strategy-tuning/*.txt
+strategy-tuning/*.json
+
 # Keep folder structure
 !back-test/README.md
 !analytics/README.md
+!strategy-tuning/README.md
