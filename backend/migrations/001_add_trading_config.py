@@ -128,7 +128,7 @@ def run_migration():
                 'migration_001',
                 'Initial configuration migrated from .env.dev'
             )
-        """, (date.today(), '["SPY", "QQQ", "DIA"]'))
+        """, (date(1970, 1, 1), '["SPY", "QQQ", "DIA"]'))
 
         conn.commit()
         print("Migration completed successfully!")
