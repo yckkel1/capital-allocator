@@ -638,6 +638,14 @@ class StrategyTuner:
             old_val = old_dict[key]
             new_val = new_dict[key]
 
+            # Skip non-numeric fields (like assets list, dates, strings)
+            if not isinstance(old_val, (int, float)) or not isinstance(new_val, (int, float)):
+                # For non-numeric fields, just show if they changed
+                if old_val != new_val:
+                    add(f"📝 {key:<37} {str(old_val):<15} {str(new_val):<15} {'changed':<15}")
+                    changes_made = True
+                continue
+
             if abs(old_val - new_val) > 0.001:  # Changed
                 change = new_val - old_val
                 change_str = f"{change:+.3f}"
