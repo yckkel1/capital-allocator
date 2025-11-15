@@ -36,6 +36,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = False
         protected_namespaces = ('settings_',)  # Avoid conflict with model_type field
+        extra = 'ignore'  # Ignore extra fields in .env files (trading params now in database)
 
 
 @lru_cache()
