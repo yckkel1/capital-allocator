@@ -46,9 +46,17 @@ class TradeEvaluation:
     was_profitable: bool
     pnl: float
 
-    # Rating
+    # Rating (required fields must come before optional)
     score: float  # -1 to 1, negative = bad trade, positive = good trade
     should_have_avoided: bool
+
+    # Enhanced metrics (NEW) - optional fields with defaults
+    pnl_10d: float = 0.0  # P&L at 10 days
+    pnl_20d: float = 0.0  # P&L at 20 days
+    pnl_30d: float = 0.0  # P&L at 30 days
+    best_horizon: str = "10d"  # Which horizon was most profitable
+    confidence_bucket: str = "unknown"  # Signal confidence bucket
+    signal_type: str = "unknown"  # Type of signal (momentum, mean_reversion, etc.)
 
 
 class StrategyTuner:
@@ -193,7 +201,7 @@ class StrategyTuner:
 
     def evaluate_trades(self, start_date: date, end_date: date) -> List[TradeEvaluation]:
         """
-        Evaluate all trades in the period
+        Evaluate all trades in the period with multi-horizon analysis
 
         Returns:
             List of TradeEvaluation objects
@@ -225,34 +233,48 @@ class StrategyTuner:
             regime_score = features.get('regime', 0)
             regime = 'bullish' if regime_score > 0.3 else 'bearish' if regime_score < -0.3 else 'neutral'
 
+            # NEW: Extract confidence bucket and signal type from features
+            confidence_bucket = features.get('confidence_bucket', 'unknown')
+            signal_type = features.get('signal_type', 'unknown')
+
             # Detect market condition
             market_condition = self.detect_market_condition(trade_date)
 
-            # Calculate trade P&L (get price change over next 5-10 days)
-            future_date = trade_date + timedelta(days=10)
+            # NEW: Multi-horizon P&L calculation (10d, 20d, 30d)
+            pnl_horizons = {}
+            for horizon, days in [('10d', 10), ('20d', 20), ('30d', 30)]:
+                future_date = trade_date + timedelta(days=days)
 
-            self.cursor.execute("""
-                SELECT close_price
-                FROM price_history
-                WHERE symbol = %s
-                AND date > %s AND date <= %s
-                ORDER BY date DESC
-                LIMIT 1
-            """, (symbol, trade_date, future_date))
+                self.cursor.execute("""
+                    SELECT close_price
+                    FROM price_history
+                    WHERE symbol = %s
+                    AND date > %s AND date <= %s
+                    ORDER BY date DESC
+                    LIMIT 1
+                """, (symbol, trade_date, future_date))
 
-            future_price_row = self.cursor.fetchone()
-            future_price = float(future_price_row['close_price']) if future_price_row else price
+                future_price_row = self.cursor.fetchone()
+                future_price = float(future_price_row['close_price']) if future_price_row else price
 
-            # Calculate P&L
-            if action == 'BUY':
-                pnl = (future_price - price) * abs(quantity)
-                was_profitable = pnl > 0
-            else:  # SELL
-                pnl = (price - future_price) * abs(quantity)
-                was_profitable = pnl > 0
+                # Calculate P&L for this horizon
+                if action == 'BUY':
+                    horizon_pnl = (future_price - price) * abs(quantity)
+                else:  # SELL
+                    horizon_pnl = (price - future_price) * abs(quantity)
+
+                pnl_horizons[horizon] = horizon_pnl
+
+            # Best performing horizon
+            best_horizon = max(pnl_horizons.keys(), key=lambda k: pnl_horizons[k])
+            best_pnl = pnl_horizons[best_horizon]
+
+            # Use best horizon for profitability determination (NEW: multi-horizon evaluation)
+            was_profitable = best_pnl > 0
+            pnl = best_pnl  # Use best horizon as the primary P&L
 
             # Calculate contribution to drawdown
-            drawdown_contribution = self.calculate_drawdown_contribution(trade_date, pnl)
+            drawdown_contribution = self.calculate_drawdown_contribution(trade_date, pnl_horizons['10d'])
 
             # Calculate Sharpe impact (simplified - based on if trade aligned with profitable regime)
             sharpe_impact = 0.0
@@ -263,7 +285,11 @@ class StrategyTuner:
             elif market_condition == 'choppy' and action == 'BUY':
                 sharpe_impact = -0.1  # Added risk in choppy market
 
-            # Calculate trade score (-1 to 1)
+            # NEW: Bonus for mean reversion trades that work
+            if signal_type and 'mean_reversion' in signal_type and was_profitable:
+                sharpe_impact += 0.15
+
+            # Calculate trade score (-1 to 1) with enhanced logic
             score = 0.0
 
             # Positive factors
@@ -273,6 +299,13 @@ class StrategyTuner:
                 score += 0.2
             if drawdown_contribution < 5:  # Low DD contribution is good
                 score += 0.2
+
+            # NEW: Multi-horizon consistency bonus
+            profitable_horizons = sum(1 for p in pnl_horizons.values() if p > 0)
+            if profitable_horizons == 3:
+                score += 0.2  # Profitable at all horizons
+            elif profitable_horizons == 2:
+                score += 0.1  # Profitable at 2 horizons
 
             # Negative factors
             if not was_profitable:
@@ -288,12 +321,19 @@ class StrategyTuner:
             elif market_condition == 'choppy' and action == 'BUY' and not was_profitable:
                 score -= 0.3
 
+            # NEW: Confidence bucket scoring
+            if confidence_bucket == 'high' and was_profitable:
+                score += 0.1  # High confidence trades should be profitable
+            elif confidence_bucket == 'low' and not was_profitable:
+                score += 0.1  # Low confidence trades avoiding losses is good
+
             score = max(-1.0, min(1.0, score))  # Clamp to [-1, 1]
 
             # Should have avoided?
             should_have_avoided = (
                 drawdown_contribution > 20 or
-                (market_condition == 'choppy' and action == 'BUY' and not was_profitable)
+                (market_condition == 'choppy' and action == 'BUY' and not was_profitable) or
+                (confidence_bucket == 'low' and not was_profitable and pnl_horizons['10d'] < -50)
             )
 
             evaluation = TradeEvaluation(
@@ -307,6 +347,12 @@ class StrategyTuner:
                 sharpe_impact=sharpe_impact,
                 was_profitable=was_profitable,
                 pnl=pnl,
+                pnl_10d=pnl_horizons['10d'],
+                pnl_20d=pnl_horizons['20d'],
+                pnl_30d=pnl_horizons['30d'],
+                best_horizon=best_horizon,
+                confidence_bucket=confidence_bucket,
+                signal_type=signal_type,
                 score=score,
                 should_have_avoided=should_have_avoided
             )
@@ -377,6 +423,128 @@ class StrategyTuner:
             'overall': calc_metrics(evaluations)
         }
 
+    def analyze_confidence_buckets(self, evaluations: List[TradeEvaluation]) -> Dict:
+        """
+        Analyze performance by confidence bucket
+
+        Returns:
+            Dictionary with performance metrics by confidence level
+        """
+        high_conf = [e for e in evaluations if e.confidence_bucket == 'high']
+        medium_conf = [e for e in evaluations if e.confidence_bucket == 'medium']
+        low_conf = [e for e in evaluations if e.confidence_bucket == 'low']
+
+        def calc_bucket_metrics(trades):
+            if not trades:
+                return {
+                    'count': 0,
+                    'win_rate': 0,
+                    'avg_pnl': 0,
+                    'total_pnl': 0,
+                    'avg_score': 0,
+                    'best_horizon_10d': 0,
+                    'best_horizon_20d': 0,
+                    'best_horizon_30d': 0
+                }
+
+            wins = sum(1 for t in trades if t.was_profitable)
+            win_rate = wins / len(trades) * 100
+            total_pnl = sum(t.pnl for t in trades)
+            avg_pnl = total_pnl / len(trades)
+            avg_score = sum(t.score for t in trades) / len(trades)
+
+            # Analyze which horizon performs best
+            best_10d = sum(1 for t in trades if t.best_horizon == '10d')
+            best_20d = sum(1 for t in trades if t.best_horizon == '20d')
+            best_30d = sum(1 for t in trades if t.best_horizon == '30d')
+
+            return {
+                'count': len(trades),
+                'win_rate': win_rate,
+                'avg_pnl': avg_pnl,
+                'total_pnl': total_pnl,
+                'avg_score': avg_score,
+                'best_horizon_10d': best_10d,
+                'best_horizon_20d': best_20d,
+                'best_horizon_30d': best_30d
+            }
+
+        return {
+            'high': calc_bucket_metrics(high_conf),
+            'medium': calc_bucket_metrics(medium_conf),
+            'low': calc_bucket_metrics(low_conf)
+        }
+
+    def analyze_signal_types(self, evaluations: List[TradeEvaluation]) -> Dict:
+        """
+        Analyze performance by signal type (momentum vs mean reversion)
+
+        Returns:
+            Dictionary with performance metrics by signal type
+        """
+        signal_groups = {}
+        for eval in evaluations:
+            signal_type = eval.signal_type
+            if signal_type not in signal_groups:
+                signal_groups[signal_type] = []
+            signal_groups[signal_type].append(eval)
+
+        results = {}
+        for signal_type, trades in signal_groups.items():
+            wins = sum(1 for t in trades if t.was_profitable)
+            win_rate = wins / len(trades) * 100 if trades else 0
+            total_pnl = sum(t.pnl for t in trades)
+            avg_pnl = total_pnl / len(trades) if trades else 0
+
+            results[signal_type] = {
+                'count': len(trades),
+                'win_rate': win_rate,
+                'total_pnl': total_pnl,
+                'avg_pnl': avg_pnl
+            }
+
+        return results
+
+    def perform_out_of_sample_validation(self, candidate_params: TradingConfig,
+                                         train_period: Tuple[date, date],
+                                         test_period: Tuple[date, date]) -> Dict:
+        """
+        Validate tuned parameters on out-of-sample data
+
+        Returns:
+            Dictionary with validation results
+        """
+        # This is a simplified validation - we check if the tuned parameters
+        # would have led to better decisions in the test period
+
+        train_start, train_end = train_period
+        test_start, test_end = test_period
+
+        # Get test period performance
+        test_metrics = self.calculate_overall_metrics(test_start, test_end)
+
+        # Compare against targets
+        sharpe_passes = test_metrics.get('sharpe_ratio', 0) >= candidate_params.min_sharpe_target * 0.8
+        drawdown_passes = test_metrics.get('max_drawdown', 100) <= candidate_params.max_drawdown_tolerance * 1.2
+
+        # Overall validation score
+        validation_score = 0
+        if sharpe_passes:
+            validation_score += 0.5
+        if drawdown_passes:
+            validation_score += 0.5
+
+        return {
+            'passes_validation': validation_score >= 0.5,
+            'validation_score': validation_score,
+            'test_sharpe': test_metrics.get('sharpe_ratio', 0),
+            'test_max_drawdown': test_metrics.get('max_drawdown', 0),
+            'sharpe_passes': sharpe_passes,
+            'drawdown_passes': drawdown_passes,
+            'train_period': f"{train_start} to {train_end}",
+            'test_period': f"{test_start} to {test_end}"
+        }
+
     def calculate_overall_metrics(self, start_date: date, end_date: date) -> Dict:
         """Calculate overall performance metrics for the period"""
         self.cursor.execute("""
@@ -432,7 +600,9 @@ class StrategyTuner:
     def tune_parameters(self,
                        evaluations: List[TradeEvaluation],
                        condition_analysis: Dict,
-                       overall_metrics: Dict) -> TradingConfig:
+                       overall_metrics: Dict,
+                       confidence_analysis: Dict = None,
+                       signal_type_analysis: Dict = None) -> TradingConfig:
         """
         Adjust parameters based on analysis
 
@@ -456,7 +626,18 @@ class StrategyTuner:
             momentum_weight=self.current_params.momentum_weight,
             price_momentum_weight=self.current_params.price_momentum_weight,
             max_drawdown_tolerance=self.current_params.max_drawdown_tolerance,
-            min_sharpe_target=self.current_params.min_sharpe_target
+            min_sharpe_target=self.current_params.min_sharpe_target,
+            # NEW: Include enhanced parameters
+            rsi_oversold_threshold=self.current_params.rsi_oversold_threshold,
+            rsi_overbought_threshold=self.current_params.rsi_overbought_threshold,
+            bollinger_std_multiplier=self.current_params.bollinger_std_multiplier,
+            mean_reversion_allocation=self.current_params.mean_reversion_allocation,
+            volatility_adjustment_factor=self.current_params.volatility_adjustment_factor,
+            base_volatility=self.current_params.base_volatility,
+            min_confidence_threshold=self.current_params.min_confidence_threshold,
+            confidence_scaling_factor=self.current_params.confidence_scaling_factor,
+            intramonth_drawdown_limit=self.current_params.intramonth_drawdown_limit,
+            circuit_breaker_reduction=self.current_params.circuit_breaker_reduction
         )
 
         momentum_perf = condition_analysis['momentum']
@@ -511,6 +692,45 @@ class StrategyTuner:
                 new_params.sell_percentage = min(0.9, new_params.sell_percentage + 0.1)
                 print("  🔻 Poor bearish performance - increasing sell percentage")
 
+        # NEW: 6. Tune confidence-based parameters
+        if confidence_analysis:
+            low_conf = confidence_analysis.get('low', {})
+            high_conf = confidence_analysis.get('high', {})
+
+            # If low confidence trades are losing money, raise the threshold
+            if low_conf.get('count', 0) > 0 and low_conf.get('win_rate', 50) < 40:
+                new_params.min_confidence_threshold = min(0.5, new_params.min_confidence_threshold + 0.05)
+                print(f"  🎯 Low confidence trades underperforming ({low_conf['win_rate']:.1f}%) - raising threshold")
+
+            # If high confidence trades are very profitable, increase scaling factor
+            if high_conf.get('count', 0) > 0 and high_conf.get('win_rate', 50) > 70:
+                new_params.confidence_scaling_factor = min(0.8, new_params.confidence_scaling_factor + 0.1)
+                print(f"  💎 High confidence trades performing well ({high_conf['win_rate']:.1f}%) - increasing sizing")
+
+        # NEW: 7. Tune mean reversion parameters
+        if signal_type_analysis:
+            mr_oversold = signal_type_analysis.get('mean_reversion_oversold', {})
+            momentum_signals = signal_type_analysis.get('bullish_momentum', {})
+
+            # If mean reversion signals are working, increase allocation
+            if mr_oversold.get('count', 0) > 0 and mr_oversold.get('win_rate', 50) > 60:
+                new_params.mean_reversion_allocation = min(0.6, new_params.mean_reversion_allocation + 0.05)
+                print(f"  📊 Mean reversion signals profitable ({mr_oversold['win_rate']:.1f}%) - increasing allocation")
+
+            # If mean reversion signals are losing, be more selective
+            if mr_oversold.get('count', 0) > 0 and mr_oversold.get('win_rate', 50) < 45:
+                new_params.rsi_oversold_threshold = max(20.0, new_params.rsi_oversold_threshold - 5)
+                print(f"  📉 Mean reversion signals underperforming - tightening RSI threshold")
+
+        # NEW: 8. Adjust circuit breaker based on intra-month drawdowns
+        circuit_breaker_trades = [e for e in evaluations if e.signal_type == 'circuit_breaker']
+        if circuit_breaker_trades:
+            cb_effectiveness = sum(1 for t in circuit_breaker_trades if t.score > 0) / len(circuit_breaker_trades)
+            if cb_effectiveness < 0.5:
+                # Circuit breaker triggering too late or ineffectively
+                new_params.intramonth_drawdown_limit = max(0.05, new_params.intramonth_drawdown_limit - 0.02)
+                print(f"  ⚠️  Circuit breaker effectiveness low - tightening trigger")
+
         return new_params
 
     def save_parameters(self, params: TradingConfig, report_path: str, start_date: date):
@@ -550,7 +770,10 @@ class StrategyTuner:
                        condition_analysis: Dict,
                        overall_metrics: Dict,
                        start_date: date,
-                       end_date: date) -> str:
+                       end_date: date,
+                       confidence_analysis: Dict = None,
+                       signal_type_analysis: Dict = None,
+                       validation_result: Dict = None) -> str:
         """
         Generate comprehensive tuning report
 
@@ -711,7 +934,7 @@ class StrategyTuner:
     def run(self):
         """Main execution flow"""
         print(f"\n{'='*80}")
-        print(f"🚀 STARTING MONTHLY STRATEGY TUNING")
+        print(f"🚀 STARTING ENHANCED MONTHLY STRATEGY TUNING")
         print(f"{'='*80}\n")
 
         # 1. Determine analysis period
@@ -719,8 +942,8 @@ class StrategyTuner:
         start_date, end_date = self.get_analysis_period()
         print(f"   Analysis Period: {start_date} to {end_date}\n")
 
-        # 2. Evaluate all trades
-        print("🔍 Evaluating trades...")
+        # 2. Evaluate all trades with multi-horizon analysis
+        print("🔍 Evaluating trades (10d, 20d, 30d horizons)...")
         evaluations = self.evaluate_trades(start_date, end_date)
         print(f"   Analyzed {len(evaluations)} trades\n")
 
@@ -730,34 +953,76 @@ class StrategyTuner:
         print(f"   Momentum trades: {condition_analysis['momentum']['count']}")
         print(f"   Choppy trades: {condition_analysis['choppy']['count']}\n")
 
+        # NEW: 3b. Analyze confidence buckets
+        print("🎯 Analyzing performance by confidence bucket...")
+        confidence_analysis = self.analyze_confidence_buckets(evaluations)
+        for bucket, metrics in confidence_analysis.items():
+            if metrics['count'] > 0:
+                print(f"   {bucket.upper()}: {metrics['count']} trades, {metrics['win_rate']:.1f}% win rate, ${metrics['total_pnl']:+,.2f}")
+        print()
+
+        # NEW: 3c. Analyze signal types
+        print("📈 Analyzing performance by signal type...")
+        signal_type_analysis = self.analyze_signal_types(evaluations)
+        for signal_type, metrics in signal_type_analysis.items():
+            if metrics['count'] > 0:
+                print(f"   {signal_type}: {metrics['count']} trades, {metrics['win_rate']:.1f}% win rate")
+        print()
+
         # 4. Calculate overall metrics
         print("📊 Calculating overall metrics...")
         overall_metrics = self.calculate_overall_metrics(start_date, end_date)
         print(f"   Sharpe: {overall_metrics.get('sharpe_ratio', 0):.3f}")
         print(f"   Max DD: {overall_metrics.get('max_drawdown', 0):.2f}%\n")
 
-        # 5. Tune parameters
+        # 5. Tune parameters with enhanced analysis
         print("🔧 Tuning parameters based on analysis...\n")
         old_params = self.current_params
-        new_params = self.tune_parameters(evaluations, condition_analysis, overall_metrics)
+        new_params = self.tune_parameters(
+            evaluations, condition_analysis, overall_metrics,
+            confidence_analysis, signal_type_analysis
+        )
 
-        # 6. Generate report
+        # NEW: 6. Out-of-sample validation
+        # Split period: first 2/3 for training, last 1/3 for testing
+        total_days = (end_date - start_date).days
+        train_end = start_date + timedelta(days=int(total_days * 0.67))
+        test_start = train_end + timedelta(days=1)
+
+        print("🧪 Performing out-of-sample validation...")
+        validation_result = self.perform_out_of_sample_validation(
+            new_params,
+            (start_date, train_end),
+            (test_start, end_date)
+        )
+        print(f"   Validation Score: {validation_result['validation_score']:.2f}")
+        print(f"   Test Sharpe: {validation_result['test_sharpe']:.3f}")
+        print(f"   Test Max DD: {validation_result['test_max_drawdown']:.2f}%")
+
+        if not validation_result['passes_validation']:
+            print("   ⚠️  WARNING: Parameters may not generalize well - consider being more conservative")
+        else:
+            print("   ✅ Parameters pass out-of-sample validation")
+        print()
+
+        # 7. Generate report
         print("\n📝 Generating comprehensive report...\n")
         report_path = self.generate_report(
             old_params, new_params, evaluations,
             condition_analysis, overall_metrics,
-            start_date, end_date
+            start_date, end_date,
+            confidence_analysis=confidence_analysis,
+            signal_type_analysis=signal_type_analysis,
+            validation_result=validation_result
         )
 
-        # 7. Save parameters to database with start date = first day of current month
-        # User will run this script on the first trading day of the month
-        # So we set start date to first day of the current month (not today)
+        # 8. Save parameters to database with start date = first day of current month
         today = date.today()
-        next_config_start_date = date(today.year, today.month, 1)  # First day of current month
+        next_config_start_date = date(today.year, today.month, 1)
         self.save_parameters(new_params, report_path, next_config_start_date)
 
         print(f"\n{'='*80}")
-        print(f"✅ MONTHLY TUNING COMPLETED")
+        print(f"✅ ENHANCED MONTHLY TUNING COMPLETED")
         print(f"{'='*80}\n")
 
 

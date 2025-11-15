@@ -132,6 +132,24 @@ class TradingConfig(Base):
     max_drawdown_tolerance = Column(Float, nullable=False, default=15.0)
     min_sharpe_target = Column(Float, nullable=False, default=1.0)
 
+    # Mean Reversion Parameters (NEW)
+    rsi_oversold_threshold = Column(Float, nullable=False, default=30.0)
+    rsi_overbought_threshold = Column(Float, nullable=False, default=70.0)
+    bollinger_std_multiplier = Column(Float, nullable=False, default=2.0)
+    mean_reversion_allocation = Column(Float, nullable=False, default=0.4)  # Allocation for mean reversion signals
+
+    # Adaptive Threshold Parameters (NEW)
+    volatility_adjustment_factor = Column(Float, nullable=False, default=0.4)  # How much to adjust thresholds based on vol
+    base_volatility = Column(Float, nullable=False, default=0.01)  # Historical average volatility baseline
+
+    # Confidence-Based Position Sizing (NEW)
+    min_confidence_threshold = Column(Float, nullable=False, default=0.3)  # Minimum confidence to trade
+    confidence_scaling_factor = Column(Float, nullable=False, default=0.5)  # How much confidence affects sizing
+
+    # Circuit Breaker Parameters (NEW)
+    intramonth_drawdown_limit = Column(Float, nullable=False, default=0.10)  # 10% intra-month max drawdown
+    circuit_breaker_reduction = Column(Float, nullable=False, default=0.5)  # Reduce positions by 50% when triggered
+
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     created_by = Column(String(100), nullable=True)  # Who created this version (user/script)

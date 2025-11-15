@@ -51,6 +51,24 @@ class TradingConfig:
     max_drawdown_tolerance: float
     min_sharpe_target: float
 
+    # Mean Reversion Parameters (NEW)
+    rsi_oversold_threshold: float = 30.0
+    rsi_overbought_threshold: float = 70.0
+    bollinger_std_multiplier: float = 2.0
+    mean_reversion_allocation: float = 0.4
+
+    # Adaptive Threshold Parameters (NEW)
+    volatility_adjustment_factor: float = 0.4
+    base_volatility: float = 0.01
+
+    # Confidence-Based Position Sizing (NEW)
+    min_confidence_threshold: float = 0.3
+    confidence_scaling_factor: float = 0.5
+
+    # Circuit Breaker Parameters (NEW)
+    intramonth_drawdown_limit: float = 0.10
+    circuit_breaker_reduction: float = 0.5
+
     # Metadata
     id: Optional[int] = None
     start_date: Optional[date] = None
@@ -85,6 +103,17 @@ class TradingConfig:
             price_momentum_weight=float(row['price_momentum_weight']),
             max_drawdown_tolerance=float(row['max_drawdown_tolerance']),
             min_sharpe_target=float(row['min_sharpe_target']),
+            # New parameters with defaults for backward compatibility
+            rsi_oversold_threshold=float(row.get('rsi_oversold_threshold', 30.0)),
+            rsi_overbought_threshold=float(row.get('rsi_overbought_threshold', 70.0)),
+            bollinger_std_multiplier=float(row.get('bollinger_std_multiplier', 2.0)),
+            mean_reversion_allocation=float(row.get('mean_reversion_allocation', 0.4)),
+            volatility_adjustment_factor=float(row.get('volatility_adjustment_factor', 0.4)),
+            base_volatility=float(row.get('base_volatility', 0.01)),
+            min_confidence_threshold=float(row.get('min_confidence_threshold', 0.3)),
+            confidence_scaling_factor=float(row.get('confidence_scaling_factor', 0.5)),
+            intramonth_drawdown_limit=float(row.get('intramonth_drawdown_limit', 0.10)),
+            circuit_breaker_reduction=float(row.get('circuit_breaker_reduction', 0.5)),
             created_by=row.get('created_by'),
             notes=row.get('notes')
         )
@@ -218,6 +247,11 @@ class ConfigLoader:
                     allocation_neutral, sell_percentage,
                     momentum_weight, price_momentum_weight,
                     max_drawdown_tolerance, min_sharpe_target,
+                    rsi_oversold_threshold, rsi_overbought_threshold,
+                    bollinger_std_multiplier, mean_reversion_allocation,
+                    volatility_adjustment_factor, base_volatility,
+                    min_confidence_threshold, confidence_scaling_factor,
+                    intramonth_drawdown_limit, circuit_breaker_reduction,
                     created_by, notes
                 ) VALUES (
                     %s, NULL,
@@ -225,6 +259,11 @@ class ConfigLoader:
                     %s, %s,
                     %s, %s,
                     %s, %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s,
                     %s, %s,
                     %s, %s,
                     %s, %s,
@@ -240,6 +279,11 @@ class ConfigLoader:
                 config.allocation_neutral, config.sell_percentage,
                 config.momentum_weight, config.price_momentum_weight,
                 config.max_drawdown_tolerance, config.min_sharpe_target,
+                config.rsi_oversold_threshold, config.rsi_overbought_threshold,
+                config.bollinger_std_multiplier, config.mean_reversion_allocation,
+                config.volatility_adjustment_factor, config.base_volatility,
+                config.min_confidence_threshold, config.confidence_scaling_factor,
+                config.intramonth_drawdown_limit, config.circuit_breaker_reduction,
                 created_by, notes
             ))
 
