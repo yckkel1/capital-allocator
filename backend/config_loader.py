@@ -9,7 +9,7 @@ from dataclasses import dataclass, asdict
 from functools import lru_cache
 
 import psycopg2
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import RealDictCursor, Json
 from dotenv import load_dotenv
 
 # Load environment variables (only DATABASE_URL and API keys)
@@ -208,6 +208,7 @@ class ConfigLoader:
                 """, (previous_end_date, start_date))
 
             # Insert new configuration
+            # Note: Wrap assets list in Json() for proper JSONB conversion
             cursor.execute("""
                 INSERT INTO trading_config (
                     start_date, end_date,
@@ -233,7 +234,7 @@ class ConfigLoader:
                 RETURNING id
             """, (
                 start_date,
-                config.daily_capital, config.assets, config.lookback_days,
+                config.daily_capital, Json(config.assets), config.lookback_days,
                 config.regime_bullish_threshold, config.regime_bearish_threshold,
                 config.risk_high_threshold, config.risk_medium_threshold,
                 config.allocation_low_risk, config.allocation_medium_risk, config.allocation_high_risk,
