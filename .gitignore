@@ -87,3 +87,7 @@ backend/coverage.xml
 *.pytest_cache
 __pycache__/
 .mypy_cache/
+
+# E2E test reports
+data/test-reports/
+backend/tests/fixtures/price_history_test_data.json
