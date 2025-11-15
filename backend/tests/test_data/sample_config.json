@@ -1,0 +1,23 @@
+{
+  "id": 1,
+  "start_date": "2025-11-01",
+  "end_date": null,
+  "daily_capital": 1000.0,
+  "assets": ["SPY", "QQQ", "DIA"],
+  "lookback_days": 252,
+  "regime_bullish_threshold": 0.3,
+  "regime_bearish_threshold": -0.3,
+  "risk_high_threshold": 70.0,
+  "risk_medium_threshold": 40.0,
+  "allocation_low_risk": 0.8,
+  "allocation_medium_risk": 0.5,
+  "allocation_high_risk": 0.3,
+  "allocation_neutral": 0.2,
+  "sell_percentage": 0.7,
+  "momentum_weight": 0.6,
+  "price_momentum_weight": 0.4,
+  "max_drawdown_tolerance": 15.0,
+  "min_sharpe_target": 1.0,
+  "created_by": "migration",
+  "notes": "Initial configuration v1.0"
+}

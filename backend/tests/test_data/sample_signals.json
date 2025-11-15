@@ -1,0 +1,59 @@
+[
+  {
+    "id": 1,
+    "trade_date": "2025-11-15",
+    "generated_at": "2025-11-15T06:00:00Z",
+    "allocations": {"SPY": 400.0, "QQQ": 300.0, "DIA": 100.0},
+    "model_type": "regime_based",
+    "confidence_score": 0.75,
+    "features_used": {
+      "regime": 0.35,
+      "risk": 45.0,
+      "action": "BUY",
+      "allocation_pct": 0.8,
+      "assets": {
+        "SPY": {"returns_5d": 0.015, "returns_20d": 0.035, "returns_60d": 0.08, "volatility": 0.012, "score": 3.5},
+        "QQQ": {"returns_5d": 0.012, "returns_20d": 0.03, "returns_60d": 0.075, "volatility": 0.015, "score": 3.0},
+        "DIA": {"returns_5d": 0.008, "returns_20d": 0.025, "returns_60d": 0.06, "volatility": 0.01, "score": 2.5}
+      }
+    }
+  },
+  {
+    "id": 2,
+    "trade_date": "2025-11-14",
+    "generated_at": "2025-11-14T06:00:00Z",
+    "allocations": {"SPY": 0.0, "QQQ": 0.0, "DIA": 0.0},
+    "model_type": "regime_based",
+    "confidence_score": 0.25,
+    "features_used": {
+      "regime": 0.1,
+      "risk": 65.0,
+      "action": "HOLD",
+      "allocation_pct": 0.0,
+      "assets": {
+        "SPY": {"returns_5d": 0.005, "returns_20d": 0.02, "returns_60d": 0.05, "volatility": 0.018, "score": 1.5},
+        "QQQ": {"returns_5d": 0.004, "returns_20d": 0.018, "returns_60d": 0.045, "volatility": 0.02, "score": 1.2},
+        "DIA": {"returns_5d": 0.003, "returns_20d": 0.015, "returns_60d": 0.04, "volatility": 0.015, "score": 1.0}
+      }
+    }
+  },
+  {
+    "id": 3,
+    "trade_date": "2025-11-13",
+    "generated_at": "2025-11-13T06:00:00Z",
+    "allocations": {"SPY": -0.5, "QQQ": -0.5, "DIA": 0.0},
+    "model_type": "regime_based",
+    "confidence_score": 0.45,
+    "features_used": {
+      "regime": -0.35,
+      "risk": 55.0,
+      "action": "SELL",
+      "allocation_pct": 0.5,
+      "assets": {
+        "SPY": {"returns_5d": -0.01, "returns_20d": -0.02, "returns_60d": 0.01, "volatility": 0.022, "score": -0.5},
+        "QQQ": {"returns_5d": -0.012, "returns_20d": -0.025, "returns_60d": 0.005, "volatility": 0.025, "score": -0.8},
+        "DIA": {"returns_5d": -0.005, "returns_20d": -0.01, "returns_60d": 0.02, "volatility": 0.018, "score": 0.2}
+      }
+    }
+  }
+]
