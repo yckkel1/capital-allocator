@@ -15,6 +15,7 @@ import math
 from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import Dict, List, Tuple
+from dataclasses import dataclass
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
