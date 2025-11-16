@@ -15,9 +15,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-# Load environment variables from .env file if DATABASE_URL not set
+# Load environment variables from .env file in repo root if DATABASE_URL not set
 if not os.getenv("DATABASE_URL"):
-    env_file = Path(__file__).parent.parent / '.env.dev'
+    # .env is in repository root (parent of backend/)
+    env_file = Path(__file__).parent.parent.parent / '.env'
     if env_file.exists():
         with open(env_file) as f:
             for line in f:

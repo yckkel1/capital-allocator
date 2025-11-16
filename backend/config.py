@@ -14,10 +14,10 @@ class Settings(BaseSettings):
     Trading parameters are now loaded from database via get_trading_config()
     """
 
-    # Database - REQUIRED (kept in .env.local / .env.production)
+    # Database - REQUIRED (in .env or .env.production)
     database_url: str
 
-    # Alpha Vantage API - REQUIRED (kept in .env.local / .env.production)
+    # Alpha Vantage API - REQUIRED (in .env or .env.production)
     alphavantage_api_key: str
 
     # API metadata
@@ -32,11 +32,11 @@ class Settings(BaseSettings):
     signal_generation_time: str = "06:00"  # 6:00 AM ET
 
     class Config:
-        # This will look for .env, .env.local, or .env.production
+        # Load from .env (local) or .env.production
         env_file = ".env"
         case_sensitive = False
         protected_namespaces = ('settings_',)  # Avoid conflict with model_type field
-        extra = 'ignore'  # Ignore extra fields in .env files (trading params now in database)
+        extra = 'ignore'  # Ignore extra fields in .env files
 
 
 @lru_cache()

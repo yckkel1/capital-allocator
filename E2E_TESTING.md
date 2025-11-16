@@ -110,12 +110,12 @@ pytest tests/e2e/ --cov=tests/e2e --cov-report=term-missing
 
 ```python
 from datetime import date
-from tests.e2e.test_database import TestDatabaseManager
+from tests.e2e.test_database import E2ETestDatabaseManager
 from tests.e2e.e2e_backtest import E2EBacktest
 from tests.e2e.e2e_analytics import E2EAnalytics
 
 # Setup test database
-with TestDatabaseManager() as db:
+with E2ETestDatabaseManager() as db:
     db.clear_all_test_tables()
     db.load_price_history_from_file()
     db.reset_test_trading_config()
@@ -139,13 +139,13 @@ analytics.close()
 
 1. **Clear Test Environment**
    ```python
-   with TestDatabaseManager() as db:
+   with E2ETestDatabaseManager() as db:
        db.clear_all_test_tables()
    ```
 
 2. **Load Test Data**
    ```python
-   with TestDatabaseManager() as db:
+   with E2ETestDatabaseManager() as db:
        db.load_price_history_from_file()
        db.reset_test_trading_config()
    ```
@@ -194,7 +194,7 @@ backend/
 
 ## Test Data Management
 
-### TestDatabaseManager Methods
+### E2ETestDatabaseManager Methods
 
 | Method | Description |
 |--------|-------------|
@@ -222,7 +222,7 @@ clear_test_reports()
 ```python
 import pytest
 from datetime import date
-from tests.e2e.test_database import TestDatabaseManager
+from tests.e2e.test_database import E2ETestDatabaseManager
 from tests.e2e.e2e_backtest import E2EBacktest
 
 class TestNewStrategy:
@@ -230,7 +230,7 @@ class TestNewStrategy:
     @pytest.fixture
     def setup_test_db(self):
         """Setup test database with data"""
-        with TestDatabaseManager() as db:
+        with E2ETestDatabaseManager() as db:
             db.clear_all_test_tables()
             db.load_price_history_from_file()
             db.reset_test_trading_config()
@@ -278,7 +278,7 @@ python tests/fixtures/generate_test_price_data.py
 
 ### Database Connection Failed
 
-Check your `.env.dev` file has correct `DATABASE_URL`:
+Check your `.env` file (in repository root) has correct `DATABASE_URL`:
 ```
 DATABASE_URL=postgresql://user:password@localhost/allocator_db
 ```

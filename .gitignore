@@ -30,9 +30,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Environment variables
+# Environment variables (only .env and .env.production should exist)
 .env
-.env.local
 .env.production
 
 # Database
