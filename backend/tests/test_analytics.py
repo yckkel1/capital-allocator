@@ -16,9 +16,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 class TestAnalyticsInit:
     """Test Analytics class initialization"""
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_analytics_init(self, mock_get_settings, mock_connect):
+    def test_analytics_init(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test Analytics initialization"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test:test@localhost:5432/testdb"
@@ -28,6 +29,10 @@ class TestAnalyticsInit:
         mock_cursor = MagicMock()
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from analytics import Analytics
 
@@ -39,9 +44,10 @@ class TestAnalyticsInit:
         assert analytics.end_date == end
         mock_connect.assert_called_once()
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_analytics_close(self, mock_get_settings, mock_connect):
+    def test_analytics_close(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test Analytics close method"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test:test@localhost:5432/testdb"
@@ -51,6 +57,10 @@ class TestAnalyticsInit:
         mock_cursor = MagicMock()
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from analytics import Analytics
 
@@ -64,14 +74,18 @@ class TestAnalyticsInit:
 class TestCalculateSharpeRatio:
     """Test Sharpe ratio calculation"""
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_sharpe_ratio_calculation(self, mock_get_settings, mock_connect):
+    def test_sharpe_ratio_calculation(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test Sharpe ratio calculation with valid data"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from analytics import Analytics
 
@@ -86,14 +100,18 @@ class TestCalculateSharpeRatio:
         assert sharpe > 0
         assert isinstance(sharpe, float)
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_sharpe_ratio_empty_returns(self, mock_get_settings, mock_connect):
+    def test_sharpe_ratio_empty_returns(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test Sharpe ratio with empty returns"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from analytics import Analytics
 
@@ -103,14 +121,18 @@ class TestCalculateSharpeRatio:
 
         assert sharpe == 0.0
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_sharpe_ratio_single_return(self, mock_get_settings, mock_connect):
+    def test_sharpe_ratio_single_return(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test Sharpe ratio with single return"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from analytics import Analytics
 
@@ -120,14 +142,18 @@ class TestCalculateSharpeRatio:
 
         assert sharpe == 0.0
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_sharpe_ratio_zero_variance(self, mock_get_settings, mock_connect):
+    def test_sharpe_ratio_zero_variance(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test Sharpe ratio when returns have zero variance"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from analytics import Analytics
 
@@ -144,14 +170,18 @@ class TestCalculateSharpeRatio:
 class TestCalculateMaxDrawdown:
     """Test maximum drawdown calculation"""
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_max_drawdown_calculation(self, mock_get_settings, mock_connect):
+    def test_max_drawdown_calculation(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test max drawdown with declining values"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from analytics import Analytics
 
@@ -174,14 +204,18 @@ class TestCalculateMaxDrawdown:
         assert result['peak_date'] == date(2025, 11, 2)
         assert result['trough_date'] == date(2025, 11, 4)
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_max_drawdown_empty_data(self, mock_get_settings, mock_connect):
+    def test_max_drawdown_empty_data(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test max drawdown with empty data"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from analytics import Analytics
 
@@ -193,14 +227,18 @@ class TestCalculateMaxDrawdown:
         assert result['peak_date'] is None
         assert result['trough_date'] is None
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_max_drawdown_no_decline(self, mock_get_settings, mock_connect):
+    def test_max_drawdown_no_decline(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test max drawdown when values only increase"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from analytics import Analytics
 
@@ -221,14 +259,18 @@ class TestCalculateMaxDrawdown:
 class TestCalculateCalmarRatio:
     """Test Calmar ratio calculation"""
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_calmar_ratio_normal_case(self, mock_get_settings, mock_connect):
+    def test_calmar_ratio_normal_case(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test Calmar ratio calculation"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from analytics import Analytics
 
@@ -243,14 +285,18 @@ class TestCalculateCalmarRatio:
         # 20% / 10% = 2.0
         assert calmar == 2.0
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_calmar_ratio_zero_drawdown(self, mock_get_settings, mock_connect):
+    def test_calmar_ratio_zero_drawdown(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test Calmar ratio when drawdown is zero"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from analytics import Analytics
 
@@ -260,14 +306,18 @@ class TestCalculateCalmarRatio:
 
         assert math.isinf(calmar)
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_calmar_ratio_annualized(self, mock_get_settings, mock_connect):
+    def test_calmar_ratio_annualized(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test Calmar ratio annualization"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from analytics import Analytics
 
@@ -283,9 +333,10 @@ class TestCalculateCalmarRatio:
 class TestGetPerformanceData:
     """Test performance data retrieval"""
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_get_performance_data(self, mock_get_settings, mock_connect):
+    def test_get_performance_data(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test fetching performance data"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
@@ -295,6 +346,10 @@ class TestGetPerformanceData:
         mock_cursor = MagicMock()
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         mock_cursor.fetchall.return_value = [
             {'date': date(2025, 11, 1), 'total_value': 1000},
@@ -313,9 +368,10 @@ class TestGetPerformanceData:
 class TestGetTradingDays:
     """Test trading days retrieval"""
 
+    @patch('analytics.get_trading_config')
     @patch('analytics.psycopg2.connect')
     @patch('analytics.get_settings')
-    def test_get_trading_days(self, mock_get_settings, mock_connect):
+    def test_get_trading_days(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test fetching trading days"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
@@ -325,6 +381,10 @@ class TestGetTradingDays:
         mock_cursor = MagicMock()
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         mock_cursor.fetchall.return_value = [
             {'date': date(2025, 11, 1)},
