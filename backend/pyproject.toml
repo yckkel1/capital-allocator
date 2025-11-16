@@ -8,6 +8,7 @@ markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "slow: Slow tests",
+    "e2e: End-to-end tests using test database tables",
 ]
 
 [tool.coverage.run]
@@ -19,6 +20,7 @@ omit = [
     "venv/*",
     ".venv/*",
     "migrations/*",
+    "scripts/*",
     # Exclude complex orchestration scripts that are primarily CLI entry points
     # These have comprehensive subprocess-based tests but internal methods are complex
     "analytics.py",

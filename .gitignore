@@ -30,9 +30,8 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Environment variables
+# Environment variables (only .env and .env.production should exist)
 .env
-.env.local
 .env.production
 
 # Database
@@ -87,3 +86,7 @@ backend/coverage.xml
 *.pytest_cache
 __pycache__/
 .mypy_cache/
+
+# E2E test reports
+data/test-reports/
+backend/tests/fixtures/price_history_test_data.json

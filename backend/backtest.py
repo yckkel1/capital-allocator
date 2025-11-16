@@ -27,6 +27,9 @@ class Backtest:
         self.start_date = start_date
         self.end_date = end_date
         self.trading_days = []
+        # Load daily budget from trading config
+        trading_config = get_trading_config(start_date)
+        self.daily_budget = Decimal(str(trading_config.daily_capital))
         
     def close(self):
         self.cursor.close()
@@ -260,17 +263,17 @@ class Backtest:
         total_return_pct = (total_return / total_injected * 100) if total_injected > 0 else Decimal(0)
         
         # Calculate total account value (including unused cash)
-        total_capital_received = DAILY_BUDGET * total_days
+        total_capital_received = self.daily_budget * total_days
         unused_cash = total_capital_received - total_injected
         total_account_value = final_value + unused_cash
         account_return = total_account_value - total_capital_received
         account_return_pct = (account_return / total_capital_received * 100) if total_capital_received > 0 else Decimal(0)
-        
+
         # Calculate benchmark returns (100% invested in single asset daily)
         benchmarks = {}
         for symbol in ['SPY', 'QQQ', 'DIA']:
             total_shares = Decimal(0)
-            
+
             # Simulate buying $1000 worth each trading day at opening price
             for trade_date in self.trading_days:
                 self.cursor.execute("""
@@ -278,10 +281,10 @@ class Backtest:
                     WHERE symbol = %s AND date = %s
                 """, (symbol, trade_date))
                 row = self.cursor.fetchone()
-                
+
                 if row:
                     open_price = Decimal(str(row['open_price']))
-                    shares_bought = DAILY_BUDGET / open_price
+                    shares_bought = self.daily_budget / open_price
                     total_shares += shares_bought
             
             # Value all shares at end date's closing price

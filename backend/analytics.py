@@ -14,7 +14,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 
 # Import configuration
-from config import get_settings
+from config import get_settings, get_trading_config
 
 settings = get_settings()
 DATABASE_URL = settings.database_url
@@ -27,6 +27,9 @@ class Analytics:
         self.cursor = self.conn.cursor(cursor_factory=RealDictCursor)
         self.start_date = start_date
         self.end_date = end_date
+        # Load daily budget from trading config
+        trading_config = get_trading_config(start_date)
+        self.daily_budget = Decimal(str(trading_config.daily_capital))
         
     def close(self):
         self.cursor.close()
@@ -75,21 +78,21 @@ class Analytics:
             open_price = Decimal(str(row['open_price']))
             close_price = Decimal(str(row['close_price']))
             
-            shares_bought = DAILY_BUDGET / open_price
+            shares_bought = self.daily_budget / open_price
             total_shares += shares_bought
-            
+
             # Current portfolio value
             curr_value = total_shares * close_price
-            
+
             # Daily return (excluding today's capital injection)
             if i > 0 and prev_value > 0:
-                portfolio_change = curr_value - prev_value - DAILY_BUDGET
+                portfolio_change = curr_value - prev_value - self.daily_budget
                 daily_ret = float(portfolio_change / prev_value * 100)
                 daily_returns.append(daily_ret)
-            
+
             prev_value = curr_value
-        
-        total_invested = DAILY_BUDGET * len(trading_days)
+
+        total_invested = self.daily_budget * len(trading_days)
         final_value = total_shares * close_price  # Using last close_price from loop
         total_return = final_value - total_invested
         total_return_pct = float(total_return / total_invested * 100) if total_invested > 0 else 0
@@ -184,7 +187,7 @@ class Analytics:
         years = trading_days / 252  # Approximate years
         
         # Calculate total account value properly (portfolio + unused cash)
-        total_capital_received = DAILY_BUDGET * trading_days
+        total_capital_received = self.daily_budget * trading_days
         
         # Get how much was actually invested
         self.cursor.execute("""
@@ -257,7 +260,7 @@ class Analytics:
         account_values = []
         for i, perf in enumerate(performance_data):
             day_num = i + 1
-            capital_received_to_date = DAILY_BUDGET * day_num
+            capital_received_to_date = self.daily_budget * day_num
             
             # Get spent up to this date
             self.cursor.execute("""
@@ -339,7 +342,7 @@ class Analytics:
                 if row:
                     open_price = Decimal(str(row['open_price']))
                     close_price = Decimal(str(row['close_price']))
-                    shares_bought = DAILY_BUDGET / open_price
+                    shares_bought = self.daily_budget / open_price
                     total_shares += shares_bought
                     portfolio_value = total_shares * close_price
                     bench_values.append({'total_value': float(portfolio_value), 'date': trade_date})

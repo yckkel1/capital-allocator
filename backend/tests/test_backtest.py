@@ -15,9 +15,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 class TestBacktestInit:
     """Test Backtest class initialization"""
 
+    @patch('backtest.get_trading_config')
     @patch('backtest.psycopg2.connect')
     @patch('backtest.get_settings')
-    def test_backtest_init(self, mock_get_settings, mock_connect):
+    def test_backtest_init(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test Backtest initialization"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test:test@localhost:5432/testdb"
@@ -27,6 +28,10 @@ class TestBacktestInit:
         mock_cursor = MagicMock()
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from backtest import Backtest
 
@@ -39,9 +44,10 @@ class TestBacktestInit:
         assert backtest.trading_days == []
         mock_connect.assert_called_once()
 
+    @patch('backtest.get_trading_config')
     @patch('backtest.psycopg2.connect')
     @patch('backtest.get_settings')
-    def test_backtest_close(self, mock_get_settings, mock_connect):
+    def test_backtest_close(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test Backtest close method"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
@@ -51,6 +57,10 @@ class TestBacktestInit:
         mock_cursor = MagicMock()
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from backtest import Backtest
 
@@ -64,9 +74,10 @@ class TestBacktestInit:
 class TestGetTradingDays:
     """Test get_trading_days method"""
 
+    @patch('backtest.get_trading_config')
     @patch('backtest.psycopg2.connect')
     @patch('backtest.get_settings')
-    def test_get_trading_days_success(self, mock_get_settings, mock_connect):
+    def test_get_trading_days_success(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test getting trading days successfully"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
@@ -76,6 +87,10 @@ class TestGetTradingDays:
         mock_cursor = MagicMock()
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         mock_cursor.fetchall.return_value = [
             {'date': date(2025, 11, 1)},
@@ -91,9 +106,10 @@ class TestGetTradingDays:
         assert len(days) == 3
         assert days[0] == date(2025, 11, 1)
 
+    @patch('backtest.get_trading_config')
     @patch('backtest.psycopg2.connect')
     @patch('backtest.get_settings')
-    def test_get_trading_days_no_data(self, mock_get_settings, mock_connect):
+    def test_get_trading_days_no_data(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test getting trading days with no data"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
@@ -104,6 +120,10 @@ class TestGetTradingDays:
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
         mock_cursor.fetchall.return_value = []
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from backtest import Backtest
 
@@ -118,9 +138,10 @@ class TestGetTradingDays:
 class TestClearBacktestData:
     """Test clear_backtest_data method"""
 
+    @patch('backtest.get_trading_config')
     @patch('backtest.psycopg2.connect')
     @patch('backtest.get_settings')
-    def test_clear_backtest_data(self, mock_get_settings, mock_connect):
+    def test_clear_backtest_data(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test clearing backtest data"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
@@ -130,6 +151,10 @@ class TestClearBacktestData:
         mock_cursor = MagicMock()
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from backtest import Backtest
 
@@ -145,14 +170,19 @@ class TestGenerateSignal:
     """Test generate_signal method"""
 
     @patch('backtest.subprocess.run')
+    @patch('backtest.get_trading_config')
     @patch('backtest.psycopg2.connect')
     @patch('backtest.get_settings')
-    def test_generate_signal_success(self, mock_get_settings, mock_connect, mock_subprocess):
+    def test_generate_signal_success(self, mock_get_settings, mock_connect, mock_get_trading_config, mock_subprocess):
         """Test signal generation success"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         mock_result = Mock()
         mock_result.returncode = 0
@@ -167,14 +197,19 @@ class TestGenerateSignal:
         mock_subprocess.assert_called_once()
 
     @patch('backtest.subprocess.run')
+    @patch('backtest.get_trading_config')
     @patch('backtest.psycopg2.connect')
     @patch('backtest.get_settings')
-    def test_generate_signal_failure(self, mock_get_settings, mock_connect, mock_subprocess):
+    def test_generate_signal_failure(self, mock_get_settings, mock_connect, mock_get_trading_config, mock_subprocess):
         """Test signal generation failure"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         mock_result = Mock()
         mock_result.returncode = 1
@@ -192,14 +227,19 @@ class TestExecuteTrades:
     """Test execute_trades method"""
 
     @patch('backtest.subprocess.run')
+    @patch('backtest.get_trading_config')
     @patch('backtest.psycopg2.connect')
     @patch('backtest.get_settings')
-    def test_execute_trades_success(self, mock_get_settings, mock_connect, mock_subprocess):
+    def test_execute_trades_success(self, mock_get_settings, mock_connect, mock_get_trading_config, mock_subprocess):
         """Test trade execution success"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         mock_result = Mock()
         mock_result.returncode = 0
@@ -213,14 +253,19 @@ class TestExecuteTrades:
         assert result is True
 
     @patch('backtest.subprocess.run')
+    @patch('backtest.get_trading_config')
     @patch('backtest.psycopg2.connect')
     @patch('backtest.get_settings')
-    def test_execute_trades_failure(self, mock_get_settings, mock_connect, mock_subprocess):
+    def test_execute_trades_failure(self, mock_get_settings, mock_connect, mock_get_trading_config, mock_subprocess):
         """Test trade execution failure"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
         mock_get_settings.return_value = mock_settings
         mock_connect.return_value = MagicMock()
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         mock_result = Mock()
         mock_result.returncode = 1
@@ -237,9 +282,10 @@ class TestExecuteTrades:
 class TestCalculateDailyMetrics:
     """Test calculate_daily_metrics method"""
 
+    @patch('backtest.get_trading_config')
     @patch('backtest.psycopg2.connect')
     @patch('backtest.get_settings')
-    def test_calculate_daily_metrics(self, mock_get_settings, mock_connect):
+    def test_calculate_daily_metrics(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test daily metrics calculation"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
@@ -250,12 +296,16 @@ class TestCalculateDailyMetrics:
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
 
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
+
         # Mock portfolio positions
         mock_cursor.fetchall.side_effect = [
             # Portfolio query
             [
-                {'symbol': 'SPY', 'quantity': 1.0, 'avg_cost': 575.0},
-                {'symbol': 'QQQ', 'quantity': 0.5, 'avg_cost': 495.0}
+                {'id': 1, 'symbol': 'SPY', 'quantity': 1.0, 'avg_cost': 575.0},
+                {'id': 2, 'symbol': 'QQQ', 'quantity': 0.5, 'avg_cost': 495.0}
             ],
             # Prices query
             [
@@ -289,9 +339,10 @@ class TestCalculateDailyMetrics:
 class TestSaveDailyMetrics:
     """Test save_daily_metrics method"""
 
+    @patch('backtest.get_trading_config')
     @patch('backtest.psycopg2.connect')
     @patch('backtest.get_settings')
-    def test_save_daily_metrics(self, mock_get_settings, mock_connect):
+    def test_save_daily_metrics(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test saving daily metrics"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
@@ -301,6 +352,10 @@ class TestSaveDailyMetrics:
         mock_cursor = MagicMock()
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         from backtest import Backtest
 
@@ -324,9 +379,10 @@ class TestSaveDailyMetrics:
 class TestGenerateReport:
     """Test generate_report method"""
 
+    @patch('backtest.get_trading_config')
     @patch('backtest.psycopg2.connect')
     @patch('backtest.get_settings')
-    def test_generate_report_no_metrics(self, mock_get_settings, mock_connect):
+    def test_generate_report_no_metrics(self, mock_get_settings, mock_connect, mock_get_trading_config):
         """Test report generation with no metrics"""
         mock_settings = Mock()
         mock_settings.database_url = "postgresql://test"
@@ -336,6 +392,10 @@ class TestGenerateReport:
         mock_cursor = MagicMock()
         mock_connect.return_value = mock_conn
         mock_conn.cursor.return_value = mock_cursor
+
+        mock_config = Mock()
+        mock_config.daily_capital = 1000.0
+        mock_get_trading_config.return_value = mock_config
 
         # Mock no performance metrics
         mock_cursor.fetchall.return_value = []

@@ -3,7 +3,7 @@ Migration: Add trading_config table for versioned configuration
 Created: 2025-11-13
 
 This migration creates the trading_config table and populates it with
-initial configuration from the current .env.dev file.
+initial default configuration.
 """
 import os
 import sys
@@ -13,12 +13,20 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dotenv import load_dotenv
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-# Load environment variables
-load_dotenv()
+# Load environment variables from .env file in repo root if DATABASE_URL not set
+if not os.getenv("DATABASE_URL"):
+    # .env is in repository root (parent of backend/)
+    env_file = Path(__file__).parent.parent.parent / '.env'
+    if env_file.exists():
+        with open(env_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key] = value
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -93,7 +101,7 @@ def run_migration():
             WHERE end_date IS NULL
         """)
 
-        # Insert initial configuration (from .env.dev defaults)
+        # Insert initial configuration (default values)
         print("  Inserting initial configuration...")
         cursor.execute("""
             INSERT INTO trading_config (
@@ -126,9 +134,9 @@ def run_migration():
                 0.6, 0.4,
                 15.0, 1.0,
                 'migration_001',
-                'Initial configuration migrated from .env.dev'
+                'Initial default configuration'
             )
-        """, (date.today(), '["SPY", "QQQ", "DIA"]'))
+        """, (date(1970, 1, 1), '["SPY", "QQQ", "DIA"]'))
 
         conn.commit()
         print("Migration completed successfully!")
