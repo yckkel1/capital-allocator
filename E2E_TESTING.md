@@ -75,20 +75,39 @@ python tests/e2e/e2e_runner.py
 ```
 
 This executes:
-1. Clear all test tables
-2. Load price history from fixtures
-3. Reset test trading configuration
-4. Run backtest for Month 1 (December 2024)
-5. Run analytics for Month 1
-6. Run backtest for Month 2 (January 2025)
-7. Run analytics for Month 2
-8. Run backtest for Month 3 (February 2025)
-9. Run analytics for Month 3
+1. Clear all test tables and old reports
+2. Load price history from fixtures (2024-11-11 to 2025-11-10)
+3. **Train initial parameters** using 8 months of historical data (2024-11-11 to 2025-06-30)
+4. **Run Month 1 (July 2025)** - Backtest + Analytics
+5. **Tune parameters** for Month 2 using all data through July 2025
+6. **Run Month 2 (August 2025)** - Backtest + Analytics
+7. **Tune parameters** for Month 3 using all data through August 2025
+8. **Run Month 3 (September 2025)** - Backtest + Analytics
+9. Generate comprehensive summary report
 
 Output reports are saved to:
-- `data/test-reports/backtest/`
-- `data/test-reports/analytics/`
-- `data/test-reports/tuning/`
+- `data/test-reports/backtest/` - Monthly backtest reports
+- `data/test-reports/analytics/` - Performance metrics (Sharpe, drawdown, volatility)
+- `data/test-reports/tuning/` - Parameter optimization reports
+- `data/test-reports/summary/` - Overall test summary
+
+### Key Features
+
+**Initial Parameter Training:**
+- Uses 8 months of historical data (166+ trading days) for robust parameter estimation
+- Analyzes volatility patterns, momentum trends, and RSI/Bollinger Band patterns
+- Automatically tunes regime thresholds, risk allocations, and confidence settings
+
+**Monthly Parameter Retuning:**
+- On the first day of each test month, parameters are retuned using all accumulated historical data
+- Adapts to evolving market conditions
+- Reports saved for each tuning session
+
+**Actual Trading Strategy Logic:**
+- Uses regime detection (bullish/neutral/bearish) based on multi-timeframe momentum
+- RSI and Bollinger Band analysis for mean reversion signals
+- Risk-adjusted position sizing with confidence scaling
+- Diversified asset allocation based on composite scores
 
 ### Running Pytest E2E Tests
 
@@ -174,8 +193,9 @@ backend/
 │   ├── e2e/
 │   │   ├── __init__.py              # E2E package marker
 │   │   ├── test_database.py         # Test database management
-│   │   ├── e2e_backtest.py          # Backtest using test tables
+│   │   ├── e2e_backtest.py          # Backtest using test tables (actual strategy logic)
 │   │   ├── e2e_analytics.py         # Analytics using test tables
+│   │   ├── e2e_strategy_tuner.py    # Parameter training and tuning
 │   │   ├── e2e_runner.py            # Complete E2E test runner
 │   │   └── test_e2e_backtest.py     # Pytest E2E tests
 │   └── fixtures/
@@ -189,7 +209,8 @@ backend/
     └── test-reports/                # E2E test output directory
         ├── backtest/                # Backtest reports
         ├── analytics/               # Analytics reports
-        └── tuning/                  # Strategy tuning reports
+        ├── tuning/                  # Strategy tuning reports
+        └── summary/                 # Overall test summaries
 ```
 
 ## Test Data Management
@@ -328,8 +349,11 @@ e2e_tests:
 
 ## Future Enhancements
 
-- [ ] Add strategy tuning E2E tests
+- [x] ~~Add strategy tuning E2E tests~~ (Implemented with E2EStrategyTuner)
+- [x] ~~Add initial parameter training~~ (Uses 8 months of historical data)
+- [x] ~~Monthly parameter retuning~~ (Retunes on first day of each test month)
 - [ ] Support multiple test data scenarios
-- [ ] Add performance benchmarking
+- [ ] Add performance benchmarking against market indices
 - [ ] Integrate with real-time data simulation
 - [ ] Add regression test automation
+- [ ] Walk-forward optimization testing
