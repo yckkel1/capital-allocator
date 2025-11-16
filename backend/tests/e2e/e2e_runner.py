@@ -117,12 +117,12 @@ def run_e2e_test_suite():
 
     print("   Done\n")
 
-    # Step 2: Train initial parameters using data from 2024-11
-    # Training period: Use first 30 days of data before first test period
+    # Step 2: Train initial parameters using substantial historical data
+    # Training period: 2024-11-11 to 2025-06-30 (about 8 months)
     print("Step 2: Training initial parameters on historical data...")
     train_start = date(2024, 11, 11)  # Data starts here
-    train_end = date(2024, 11, 30)    # Train on November data
-    first_test_start = date(2024, 12, 1)
+    train_end = date(2025, 6, 30)     # Train on 8 months of data
+    first_test_start = date(2025, 7, 1)
 
     tuner = E2EStrategyTuner(train_start, train_end)
     try:
@@ -135,11 +135,11 @@ def run_e2e_test_suite():
     print("   Done\n")
 
     # Define test periods (3 consecutive months)
-    # Test starts Dec 2024, uses Nov 2024 for initial training
+    # Test starts July 2025, after training on Nov 2024 - June 2025
     test_periods = [
-        (date(2024, 12, 1), date(2024, 12, 31)),  # Month 1: December 2024
-        (date(2025, 1, 1), date(2025, 1, 31)),    # Month 2: January 2025
-        (date(2025, 2, 1), date(2025, 2, 28)),    # Month 3: February 2025
+        (date(2025, 7, 1), date(2025, 7, 31)),    # Month 1: July 2025
+        (date(2025, 8, 1), date(2025, 8, 31)),    # Month 2: August 2025
+        (date(2025, 9, 1), date(2025, 9, 30)),    # Month 3: September 2025
     ]
 
     results = []
