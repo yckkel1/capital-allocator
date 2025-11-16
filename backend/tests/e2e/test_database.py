@@ -26,6 +26,16 @@ class E2ETestDatabaseManager:
 
     def __init__(self, database_url: str = None):
         if database_url is None:
+            # Load from .env in repo root if DATABASE_URL not set
+            if not os.getenv("DATABASE_URL"):
+                env_file = Path(__file__).parent.parent.parent.parent / '.env'
+                if env_file.exists():
+                    with open(env_file) as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith('#') and '=' in line:
+                                key, value = line.split('=', 1)
+                                os.environ[key] = value
             database_url = os.getenv("DATABASE_URL")
         self.database_url = database_url
         self.conn = None
