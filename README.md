@@ -308,7 +308,7 @@ position_size = base_allocation × (1 + confidence × scaling_factor)
 - Better capital preservation via circuit breakers
 - Higher risk-adjusted returns via confidence-based sizing
 
-For detailed technical documentation, see: [ENHANCED_QUANT_STRATEGY.md](./ENHANCED_QUANT_STRATEGY.md)
+For detailed technical documentation, see: [ENHANCED_QUANT_STRATEGY.md](./docs/ENHANCED_QUANT_STRATEGY.md)
 
 ---
 
@@ -614,12 +614,13 @@ capital-allocator/
 │   ├── analytics/                   # Performance analysis reports
 │   ├── strategy-tuning/             # Monthly tuning reports
 │   └── test-reports/                # E2E test outputs
+├── docs/                            # Documentation
+│   ├── ENHANCED_QUANT_STRATEGY.md   # Detailed strategy documentation
+│   ├── PRODUCTION_DEPLOYMENT.md     # Deployment guide
+│   ├── TESTING.md                   # Testing documentation
+│   └── E2E_TESTING.md               # E2E testing guide
 ├── .env                             # Environment variables (gitignored)
-├── README.md                        # This file
-├── ENHANCED_QUANT_STRATEGY.md       # Detailed strategy documentation
-├── PRODUCTION_DEPLOYMENT.md         # Deployment guide
-├── TESTING.md                       # Testing documentation
-└── E2E_TESTING.md                   # E2E testing guide
+└── README.md                        # This file
 ```
 
 ---
@@ -1369,7 +1370,7 @@ cat data/back-test/backtest_2024-01-01_to_2024-12-31.json
 **2. Configure Cron Jobs**:
 ```bash
 crontab -e
-# Add cron entries from PRODUCTION_DEPLOYMENT.md
+# Add cron entries from docs/PRODUCTION_DEPLOYMENT.md
 ```
 
 **3. Setup Log Rotation**:
@@ -1421,10 +1422,10 @@ INSERT INTO trading_config (...) VALUES (...);
 
 ## Additional Documentation
 
-- **[ENHANCED_QUANT_STRATEGY.md](./ENHANCED_QUANT_STRATEGY.md)**: Detailed strategy documentation with technical implementation details
-- **[PRODUCTION_DEPLOYMENT.md](./PRODUCTION_DEPLOYMENT.md)**: Complete deployment guide with cron configuration and monitoring setup
-- **[TESTING.md](./TESTING.md)**: Testing strategy, unit test structure, and mocking patterns
-- **[E2E_TESTING.md](./E2E_TESTING.md)**: End-to-end testing framework documentation
+- **[ENHANCED_QUANT_STRATEGY.md](./docs/ENHANCED_QUANT_STRATEGY.md)**: Detailed strategy documentation with technical implementation details
+- **[PRODUCTION_DEPLOYMENT.md](./docs/PRODUCTION_DEPLOYMENT.md)**: Complete deployment guide with cron configuration and monitoring setup
+- **[TESTING.md](./docs/TESTING.md)**: Testing strategy, unit test structure, and mocking patterns
+- **[E2E_TESTING.md](./docs/E2E_TESTING.md)**: End-to-end testing framework documentation
 
 ---
 
