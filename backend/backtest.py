@@ -119,8 +119,14 @@ class Backtest:
             print(f"   ❌ Error executing trades: {e}")
             return False
     
-    def calculate_daily_metrics(self, trade_date: date) -> Dict:
-        """Calculate performance metrics for a given day"""
+    def calculate_daily_metrics(self, trade_date: date, preserve_portfolio: bool = False) -> Dict:
+        """
+        Calculate performance metrics for a given day
+
+        Args:
+            trade_date: Date to calculate metrics for
+            preserve_portfolio: If True, account for previous period's ending value
+        """
         # Get current portfolio value
         self.cursor.execute("""
             SELECT
@@ -155,16 +161,43 @@ class Backtest:
             portfolio_value += position_value
             total_cost += position_cost
 
-        # Calculate total capital injected (sum of all BUY trades up to this date within backtest range)
+        # Get starting cash balance (if preserving portfolio from previous period)
+        starting_cash_balance = Decimal(0)
+        if preserve_portfolio:
+            # Get the last performance metric BEFORE this backtest period
+            self.cursor.execute("""
+                SELECT cash_balance
+                FROM performance_metrics
+                WHERE date < %s
+                ORDER BY date DESC
+                LIMIT 1
+            """, (self.start_date,))
+            prev_result = self.cursor.fetchone()
+            if prev_result:
+                starting_cash_balance = Decimal(str(prev_result['cash_balance']))
+
+        # Calculate number of trading days from start of this period to trade_date
         self.cursor.execute("""
-            SELECT SUM(amount) as total_injected
+            SELECT COUNT(DISTINCT date) as days_count
+            FROM price_history
+            WHERE symbol = 'SPY' AND date >= %s AND date <= %s
+        """, (self.start_date, trade_date))
+        days_result = self.cursor.fetchone()
+        days_in_period = days_result['days_count'] if days_result else 0
+
+        # Capital received this period (daily budget * trading days)
+        capital_received_this_period = self.daily_budget * Decimal(str(days_in_period))
+
+        # Calculate capital spent on BUYs THIS PERIOD
+        self.cursor.execute("""
+            SELECT SUM(amount) as total_spent
             FROM trades
             WHERE trade_date >= %s AND trade_date <= %s AND action = 'BUY'
         """, (self.start_date, trade_date))
         result = self.cursor.fetchone()
-        cash_injected = Decimal(str(result['total_injected'])) if result['total_injected'] else Decimal(0)
+        cash_spent_on_buys = Decimal(str(result['total_spent'])) if result['total_spent'] else Decimal(0)
 
-        # Get cash from sells (within backtest range)
+        # Get cash from sells THIS PERIOD
         self.cursor.execute("""
             SELECT SUM(amount) as total_proceeds
             FROM trades
@@ -172,33 +205,58 @@ class Backtest:
         """, (self.start_date, trade_date))
         result = self.cursor.fetchone()
         cash_from_sells = Decimal(str(result['total_proceeds'])) if result['total_proceeds'] else Decimal(0)
-        
-        # Total value = portfolio + cash from sells
-        total_value = portfolio_value + cash_from_sells
-        
-        # Daily return (vs previous day within backtest range)
+
+        # Calculate current cash balance:
+        # Starting cash + new capital received - spent on buys + received from sells
+        cash_balance = starting_cash_balance + capital_received_this_period - cash_spent_on_buys + cash_from_sells
+
+        # Total value = portfolio holdings + cash
+        total_value = portfolio_value + cash_balance
+
+        # Daily return (vs previous day)
         self.cursor.execute("""
             SELECT total_value
             FROM performance_metrics
-            WHERE date >= %s AND date < %s
+            WHERE date < %s
             ORDER BY date DESC
             LIMIT 1
-        """, (self.start_date, trade_date))
+        """, (trade_date,))
         prev_result = self.cursor.fetchone()
-        
+
         if prev_result:
             prev_value = Decimal(str(prev_result['total_value']))
             daily_return = ((total_value - prev_value) / prev_value * 100) if prev_value > 0 else Decimal(0)
         else:
-            daily_return = Decimal(0)
-        
-        # Cumulative return (vs total injected capital)
-        cumulative_return = ((total_value - cash_injected) / cash_injected * 100) if cash_injected > 0 else Decimal(0)
-        
+            # First day of this period
+            starting_total = starting_cash_balance + portfolio_value
+            if starting_total > 0:
+                daily_return = ((total_value - starting_total) / starting_total * 100)
+            else:
+                daily_return = Decimal(0)
+
+        # Cumulative return from start of THIS backtest period
+        # P&L this period = current total - (starting balance + capital received this period)
+        starting_for_period = starting_cash_balance + capital_received_this_period
+        if preserve_portfolio:
+            # Also add starting portfolio value
+            self.cursor.execute("""
+                SELECT portfolio_value
+                FROM performance_metrics
+                WHERE date < %s
+                ORDER BY date DESC
+                LIMIT 1
+            """, (self.start_date,))
+            prev_pf = self.cursor.fetchone()
+            if prev_pf:
+                starting_for_period += Decimal(str(prev_pf['portfolio_value']))
+
+        pnl_this_period = total_value - starting_for_period
+        cumulative_return = (pnl_this_period / starting_for_period * 100) if starting_for_period > 0 else Decimal(0)
+
         return {
             'date': trade_date,
             'portfolio_value': portfolio_value,
-            'cash_balance': cash_from_sells,
+            'cash_balance': cash_balance,
             'total_value': total_value,
             'daily_return': daily_return,
             'cumulative_return': cumulative_return
@@ -438,7 +496,7 @@ class Backtest:
 
             # Calculate metrics
             print("   Calculating metrics...", end=" ")
-            metrics = self.calculate_daily_metrics(trade_date)
+            metrics = self.calculate_daily_metrics(trade_date, preserve_portfolio=preserve_portfolio)
             self.save_daily_metrics(metrics)
             print(f"✓ (Portfolio: ${metrics['total_value']:,.2f}, Return: {metrics['cumulative_return']:+.2f}%)")
             print()
