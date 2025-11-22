@@ -110,25 +110,107 @@ def get_first_trading_day_of_month(year: int, month: int, cursor) -> date:
     return result[0] if result else first_day
 
 
-def run_monthly_tuning_for_month(year: int, month: int, lookback_months: int = 3) -> bool:
+def run_monthly_tuning_for_month(month_end_date: date, lookback_months: int = 3) -> bool:
     """
-    Run monthly tuning for a specific month
+    Run monthly tuning for a specific backtest period
+
+    Args:
+        month_end_date: The end date of the month we just backtested
+        lookback_months: Number of months to analyze
 
     Returns:
         True if tuning succeeded, False otherwise
     """
     print(f"\n{'='*60}")
-    print(f"🔧 MONTHLY TUNING: {year}-{month:02d}")
+    print(f"🔧 MONTHLY TUNING: Analysis up to {month_end_date}")
     print(f"{'='*60}\n")
 
     try:
+        settings = get_settings()
+        conn = psycopg2.connect(settings.database_url)
+        cursor = conn.cursor()
+
+        # Calculate analysis period based on backtest date (not today!)
+        end_date = month_end_date
+        start_date = end_date - timedelta(days=lookback_months * 30)
+
+        # Find actual trading days with performance data
+        cursor.execute("""
+            SELECT MIN(date) as start, MAX(date) as end
+            FROM performance_metrics
+            WHERE date >= %s AND date <= %s
+        """, (start_date, end_date))
+
+        result = cursor.fetchone()
+
+        if not result or not result[0] or not result[1]:
+            print(f"WARNING: No performance data found between {start_date} and {end_date}")
+            print("Skipping tuning for this month...")
+            conn.close()
+            return False
+
+        actual_start, actual_end = result
+        print(f"  Analysis Period: {actual_start} to {actual_end}")
+
+        # Create tuner and manually orchestrate the tuning process
+        from strategy_tuning import StrategyTuner
         tuner = StrategyTuner(lookback_months=lookback_months)
-        tuner.run()
+
+        # Override the analysis period (don't use date.today())
+        print(f"  Evaluating trades...")
+        evaluations = tuner.evaluate_trades(actual_start, actual_end)
+        print(f"    Analyzed {len(evaluations)} trades")
+
+        if len(evaluations) == 0:
+            print("  WARNING: No trades found in period, skipping tuning")
+            tuner.close()
+            conn.close()
+            return False
+
+        print(f"  Analyzing performance by market condition...")
+        condition_analysis = tuner.analyze_performance_by_condition(evaluations)
+
+        print(f"  Analyzing confidence buckets...")
+        confidence_analysis = tuner.analyze_confidence_buckets(evaluations)
+
+        print(f"  Analyzing signal types...")
+        signal_type_analysis = tuner.analyze_signal_types(evaluations)
+
+        print(f"  Calculating overall metrics...")
+        overall_metrics = tuner.calculate_overall_metrics(actual_start, actual_end)
+
+        print(f"  Tuning parameters...")
+        old_params = tuner.current_params
+        new_params = tuner.tune_parameters(
+            evaluations, condition_analysis, overall_metrics,
+            confidence_analysis, signal_type_analysis
+        )
+
+        print(f"  Generating report...")
+        report_path = tuner.generate_report(
+            old_params, new_params, evaluations,
+            condition_analysis, overall_metrics,
+            actual_start, actual_end,
+            confidence_analysis=confidence_analysis,
+            signal_type_analysis=signal_type_analysis
+        )
+
+        # Save parameters with start date = first day of next month after month_end_date
+        if month_end_date.month == 12:
+            next_month_start = date(month_end_date.year + 1, 1, 1)
+        else:
+            next_month_start = date(month_end_date.year, month_end_date.month + 1, 1)
+
+        tuner.save_parameters(new_params, report_path, next_month_start)
+
         tuner.close()
-        print(f"✓ Monthly tuning completed for {year}-{month:02d}")
+        conn.close()
+
+        print(f"  ✓ Monthly tuning completed for period ending {month_end_date}")
         return True
+
     except Exception as e:
-        print(f"WARNING: Monthly tuning failed for {year}-{month:02d}: {e}")
+        print(f"WARNING: Monthly tuning failed for period ending {month_end_date}: {e}")
         print("Continuing with current parameters...")
         import traceback
         traceback.print_exc()
@@ -262,9 +344,9 @@ def run_5y_5y_backtest_with_monthly_tuning():
             # Run monthly tuning at the START of each month (after we have data)
             # Skip first month (need history to tune)
             if i > 1:
-                # Run tuning with 3-month lookback
+                # Run tuning with 3-month lookback, using month_end as analysis endpoint
                 print(f"  Running monthly tuning for next month...")
-                if run_monthly_tuning_for_month(year, month, lookback_months=3):
+                if run_monthly_tuning_for_month(month_end, lookback_months=3):
                     tuning_count += 1
                     print(f"  ✓ Parameters updated for next month")
                 else:
