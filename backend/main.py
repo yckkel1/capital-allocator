@@ -3,14 +3,28 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from datetime import date, datetime, timedelta
 from typing import List, Dict
+import logging
 import models
 from database import get_db, init_db, engine
 from config import get_settings
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 settings = get_settings()
 
-# Create tables
-models.Base.metadata.create_all(bind=engine)
+# Run database migrations on startup
+logger.info("Running database migrations...")
+try:
+    from run_migrations import run_migrations
+    if not run_migrations():
+        logger.error("Database migrations failed! Application may not work correctly.")
+    else:
+        logger.info("Database migrations completed successfully")
+except Exception as e:
+    logger.error(f"Failed to run migrations: {e}")
+    # Don't exit - let the app start anyway in case migrations were already run
 
 app = FastAPI(
     title=settings.api_title,
