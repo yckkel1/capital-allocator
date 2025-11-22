@@ -42,17 +42,19 @@ Before deploying to Railway, you need to generate the seed data files:
 ```bash
 cd backend
 
-# Set up environment variables
-export DATABASE_URL="postgresql://user:pass@localhost:5432/dbname"
-export ALPHAVANTAGE_API_KEY="your_api_key_here"
+# Set up environment variable for your local database
+export DATABASE_URL="postgresql://user:pass@localhost:5432/capital_allocator"
 
-# Fetch 10 years of historical data for SPY, QQQ, DIA
+# Export 10 years of historical data from your local database
 python scripts/export_historical_data.py
 ```
 
-This will create `backend/alembic/seed_data/price_history_10y.sql` with approximately 7,500+ records.
+This will:
+- Connect to your local PostgreSQL database
+- Query all price_history records from the last 10 years
+- Generate `backend/alembic/seed_data/price_history_10y.sql` with approximately 7,500+ records
 
-**Note:** Alpha Vantage free tier allows 5 API calls/minute, so this will take ~45 seconds to complete.
+**Note:** This assumes you already have 10 years of price data in your local `price_history` table.
 
 #### 1.2 Generate Initial Trading Configuration
 
@@ -63,8 +65,10 @@ python scripts/train_initial_config.py
 
 This creates `backend/alembic/seed_data/trading_config_initial.sql` with the default configuration.
 
-**Optional:** To train with actual backtesting (requires price data in database):
+**Optional:** To train with actual backtesting using your local database data:
 ```bash
+# This would run backtesting using your local price_history data
+# Currently generates default config; full training to be implemented
 RUN_FULL_TUNING=true python scripts/train_initial_config.py
 ```
 

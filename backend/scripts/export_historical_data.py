@@ -1,78 +1,94 @@
 """
 Export 10 years of historical price data for initial deployment seeding.
 
-This script fetches 10 years of historical data for SPY, QQQ, and DIA
-and generates a SQL file that can be used in the seed migration.
+This script exports existing price history data from your local PostgreSQL database
+and generates a SQL file that can be used in the seed migration on Railway.
 """
 import os
 import sys
 from pathlib import Path
-import requests
-import time
 from datetime import datetime, timedelta
-import csv
-from io import StringIO
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import get_settings
 
-def fetch_full_history(symbol: str, api_key: str, output_size: str = "full") -> list:
+
+def export_from_database(years: int = 10) -> list:
     """
-    Fetch full historical data for a symbol from Alpha Vantage.
+    Export price history from local PostgreSQL database.
 
     Args:
-        symbol: Stock symbol (e.g., 'SPY')
-        api_key: Alpha Vantage API key
-        output_size: 'compact' (100 days) or 'full' (20+ years)
+        years: Number of years of historical data to export (default: 10)
 
     Returns:
         List of dict with keys: date, symbol, open, high, low, close, volume
     """
-    url = "https://www.alphavantage.co/query"
-    params = {
-        "function": "TIME_SERIES_DAILY_ADJUSTED",
-        "symbol": symbol,
-        "outputsize": output_size,
-        "apikey": api_key,
-        "datatype": "csv"
-    }
-
-    print(f"Fetching {output_size} history for {symbol}...")
-    response = requests.get(url, params=params)
-
-    if response.status_code != 200:
-        raise Exception(f"API request failed with status {response.status_code}: {response.text}")
-
-    # Parse CSV response
-    csv_data = StringIO(response.text)
-    reader = csv.DictReader(csv_data)
-
-    records = []
-    for row in reader:
-        records.append({
-            'date': row['timestamp'],
-            'symbol': symbol,
-            'open': float(row['open']),
-            'high': float(row['high']),
-            'low': float(row['low']),
-            'close': float(row['adjusted_close']),  # Use adjusted close for splits/dividends
-            'volume': float(row['volume'])
-        })
-
-    print(f"  Fetched {len(records)} records for {symbol}")
-    return records
-
-
-def filter_last_n_years(records: list, years: int = 10) -> list:
-    """Filter records to only include last N years of data."""
+    settings = get_settings()
     cutoff_date = datetime.now() - timedelta(days=years * 365)
     cutoff_str = cutoff_date.strftime('%Y-%m-%d')
 
-    filtered = [r for r in records if r['date'] >= cutoff_str]
-    print(f"  Filtered to {len(filtered)} records from {cutoff_str} onwards")
-    return filtered
+    print(f"Connecting to database: {settings.database_url.split('@')[1] if '@' in settings.database_url else 'local'}")
+
+    try:
+        # Connect to database
+        conn = psycopg2.connect(settings.database_url)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Query price history from the last N years
+        query = """
+            SELECT
+                date,
+                symbol,
+                open_price as open,
+                high_price as high,
+                low_price as low,
+                close_price as close,
+                volume
+            FROM price_history
+            WHERE date >= %s
+            ORDER BY date ASC, symbol ASC
+        """
+
+        print(f"Querying price history from {cutoff_str} onwards...")
+        cursor.execute(query, (cutoff_str,))
+
+        records = []
+        for row in cursor.fetchall():
+            records.append({
+                'date': row['date'].strftime('%Y-%m-%d'),
+                'symbol': row['symbol'],
+                'open': float(row['open']),
+                'high': float(row['high']),
+                'low': float(row['low']),
+                'close': float(row['close']),
+                'volume': float(row['volume'])
+            })
+
+        cursor.close()
+        conn.close()
+
+        print(f"  ✓ Exported {len(records)} records")
+
+        # Show breakdown by symbol
+        symbols = {}
+        for record in records:
+            symbols[record['symbol']] = symbols.get(record['symbol'], 0) + 1
+
+        for symbol, count in sorted(symbols.items()):
+            print(f"    {symbol}: {count} records")
+
+        return records
+
+    except psycopg2.Error as e:
+        print(f"Database error: {e}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 
 def generate_sql_inserts(records: list, output_file: str):
@@ -112,28 +128,27 @@ def generate_sql_inserts(records: list, output_file: str):
 
 
 def main():
-    """Main function to export historical data."""
-    settings = get_settings()
-    api_key = settings.alphavantage_api_key
+    """Main function to export historical data from local database."""
+    print("=" * 60)
+    print("Exporting Price History for Railway Deployment")
+    print("=" * 60)
+    print()
 
-    # Symbols to fetch
-    symbols = ["SPY", "QQQ", "DIA"]
-    all_records = []
+    # Export from local database
+    try:
+        all_records = export_from_database(years=10)
+    except Exception as e:
+        print(f"\nError: Failed to export data from database")
+        print(f"Make sure:")
+        print(f"  1. DATABASE_URL is set in .env")
+        print(f"  2. PostgreSQL is running")
+        print(f"  3. price_history table has data")
+        sys.exit(1)
 
-    for idx, symbol in enumerate(symbols):
-        try:
-            records = fetch_full_history(symbol, api_key, output_size="full")
-            filtered_records = filter_last_n_years(records, years=10)
-            all_records.extend(filtered_records)
-
-            # Rate limiting: Alpha Vantage free tier allows 5 calls/min
-            if idx < len(symbols) - 1:
-                print("  Waiting 15 seconds for rate limiting...")
-                time.sleep(15)
-
-        except Exception as e:
-            print(f"Error fetching {symbol}: {e}")
-            sys.exit(1)
+    if not all_records:
+        print("\n⚠ Warning: No records found in database!")
+        print("Make sure your price_history table has data for the last 10 years.")
+        sys.exit(1)
 
     # Generate SQL file
     output_dir = Path(__file__).parent.parent / "alembic" / "seed_data"
@@ -142,8 +157,14 @@ def main():
 
     generate_sql_inserts(all_records, str(output_file))
 
-    print(f"\n✓ Successfully exported {len(all_records)} records to {output_file}")
-    print(f"\nThis file will be used by the seed data migration on first deployment.")
+    print(f"\n✓ Successfully exported {len(all_records)} records")
+    print(f"✓ SQL file: {output_file}")
+    print(f"\nNext steps:")
+    print(f"  1. Review the generated file")
+    print(f"  2. Commit to git:")
+    print(f"       git add backend/alembic/seed_data/price_history_10y.sql")
+    print(f"       git commit -m 'Add 10 years of historical price data'")
+    print(f"  3. Deploy to Railway - migrations will load this data automatically!")
 
 
 if __name__ == "__main__":

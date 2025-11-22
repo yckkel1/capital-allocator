@@ -16,13 +16,8 @@ fi
 
 # Check for required environment variables
 if [ -z "$DATABASE_URL" ]; then
-    echo "Warning: DATABASE_URL not set. Using default for local testing."
-    export DATABASE_URL="postgresql://localhost:5432/capital_allocator"
-fi
-
-if [ -z "$ALPHAVANTAGE_API_KEY" ]; then
-    echo "Error: ALPHAVANTAGE_API_KEY must be set"
-    echo "Get your free API key from: https://www.alphavantage.co/support/#api-key"
+    echo "Error: DATABASE_URL must be set to export data from your local database"
+    echo "Example: export DATABASE_URL='postgresql://user:pass@localhost:5432/capital_allocator'"
     exit 1
 fi
 
@@ -60,9 +55,8 @@ if [ -f "$SEED_DIR/price_history_10y.sql" ]; then
 fi
 
 if [ "$SKIP_FETCH" != "true" ]; then
-    echo "Fetching 10 years of historical data..."
-    echo "  This will make 3 API calls to Alpha Vantage (SPY, QQQ, DIA)"
-    echo "  Free tier allows 5 calls/minute, so this will take ~45 seconds"
+    echo "Exporting 10 years of historical data from local database..."
+    echo "  This will read from your price_history table in DATABASE_URL"
     echo ""
     read -p "Continue? (Y/n): " CONTINUE
 
@@ -77,7 +71,7 @@ if [ "$SKIP_FETCH" != "true" ]; then
             echo "Error: Failed to generate price_history_10y.sql"
             exit 1
         fi
-        echo "✓ Historical price data fetched"
+        echo "✓ Historical price data exported"
         echo ""
     fi
 fi
