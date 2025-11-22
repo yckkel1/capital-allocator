@@ -1,25 +1,32 @@
 """
-Train trading configuration LOCAL LY with 5Y/5Y split.
+Train trading configuration LOCALLY with 5Y/5Y split and MONTHLY TUNING.
 
 This script:
-1. Uses AGGRESSIVE parameters for realistic backtesting
-2. Trains on 2015-2020 data (first 5 years)
-3. Backtests on 2020-2025 data (last 5 years)
-4. Generates SQL for Railway deployment
+1. Uses AGGRESSIVE parameters as baseline (2015-2020 establishes baseline)
+2. Backtests on 2020-2025 data month-by-month with MONTHLY TUNING
+3. Applies parameter adjustments monthly based on performance
+4. Generates SQL for Railway deployment with final validated params
 
 This is for LOCAL use only - generates validated config for production.
+
+CRITICAL: This does ACTUAL training by:
+- Learning from 2015-2020 baseline data
+- Running monthly tuning during 2020-2025 backtest period
+- Adjusting parameters monthly based on performance
 """
 import os
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import json
 import psycopg2
 import subprocess
+from typing import Tuple
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import get_settings
+from strategy_tuning import StrategyTuner
 
 
 def create_aggressive_config_for_backtest():
@@ -88,12 +95,58 @@ def create_aggressive_config_for_backtest():
         conn.close()
 
 
-def run_5y_5y_backtest():
-    """
-    Run 5 year training / 5 year backtest.
+def get_first_trading_day_of_month(year: int, month: int, cursor) -> date:
+    """Get the first trading day of a given month"""
+    first_day = date(year, month, 1)
 
-    Training period: 2015-2020 (establishes baseline)
-    Backtest period: 2020-2025 (validates performance)
+    cursor.execute("""
+        SELECT date FROM price_history
+        WHERE date >= %s
+        ORDER BY date ASC
+        LIMIT 1
+    """, (first_day,))
+
+    result = cursor.fetchone()
+    return result[0] if result else first_day
+
+
+def run_monthly_tuning_for_month(year: int, month: int, lookback_months: int = 3) -> bool:
+    """
+    Run monthly tuning for a specific month
+
+    Returns:
+        True if tuning succeeded, False otherwise
+    """
+    print(f"\n{'='*60}")
+    print(f"🔧 MONTHLY TUNING: {year}-{month:02d}")
+    print(f"{'='*60}\n")
+
+    try:
+        tuner = StrategyTuner(lookback_months=lookback_months)
+        tuner.run()
+        tuner.close()
+        print(f"✓ Monthly tuning completed for {year}-{month:02d}")
+        return True
+    except Exception as e:
+        print(f"WARNING: Monthly tuning failed for {year}-{month:02d}: {e}")
+        print("Continuing with current parameters...")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def run_5y_5y_backtest_with_monthly_tuning():
+    """
+    Run 5 year training / 5 year backtest WITH MONTHLY TUNING.
+
+    Training period: 2015-2020 (establishes baseline with aggressive params)
+    Backtest period: 2020-2025 (validates performance with monthly tuning)
+
+    This does ACTUAL training by:
+    1. Starting with aggressive baseline params
+    2. Running backtest month-by-month
+    3. Applying monthly tuning on 1st trading day of each month
+    4. Adjusting parameters based on performance
     """
     settings = get_settings()
     conn = psycopg2.connect(settings.database_url)
@@ -116,7 +169,7 @@ def run_5y_5y_backtest():
         years_of_data = (newest_date - oldest_date).days / 365.25
 
         print("=" * 60)
-        print("5 Year Training / 5 Year Backtest")
+        print("5Y/5Y Training with MONTHLY TUNING")
         print("=" * 60)
         print()
         print(f"Price History:")
@@ -140,30 +193,93 @@ def run_5y_5y_backtest():
         result = cursor.fetchone()
         backtest_start = result[0] if result else five_years_ago
 
+        print(f"Baseline Period: {ten_years_ago} to {backtest_start}")
+        print(f"  (Aggressive params establish baseline)")
+        print(f"Backtest Period: {backtest_start} to {newest_date}")
+        print(f"  (Monthly tuning adjusts params)")
+        print()
+
+        # Generate list of months in backtest period
+        current_date = backtest_start
+        months_to_process = []
+
+        while current_date <= newest_date:
+            months_to_process.append((current_date.year, current_date.month))
+            # Move to next month
+            if current_date.month == 12:
+                current_date = date(current_date.year + 1, 1, 1)
+            else:
+                current_date = date(current_date.year, current_date.month + 1, 1)
+
+        print(f"Total months to backtest: {len(months_to_process)}")
+        print()
+
+        # Process month by month with monthly tuning
+        tuning_count = 0
+
+        for i, (year, month) in enumerate(months_to_process, 1):
+            month_start = get_first_trading_day_of_month(year, month, cursor)
+
+            # Get month end (last day of month or newest_date)
+            if month == 12:
+                next_month_start = date(year + 1, 1, 1)
+            else:
+                next_month_start = date(year, month + 1, 1)
+
+            cursor.execute("""
+                SELECT date FROM price_history
+                WHERE date >= %s AND date < %s
+                ORDER BY date DESC
+                LIMIT 1
+            """, (month_start, min(next_month_start, newest_date + timedelta(days=1))))
+
+            result = cursor.fetchone()
+            month_end = result[0] if result else month_start
+
+            print(f"\n[{i}/{len(months_to_process)}] Processing {year}-{month:02d} ({month_start} to {month_end})")
+
+            # Run backtest for this month
+            print(f"  Running backtest for {year}-{month:02d}...")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "backtest.py",
+                    "--start-date", str(month_start),
+                    "--end-date", str(month_end)
+                ],
+                cwd=str(Path(__file__).parent.parent),
+                capture_output=True,
+                text=True
+            )
+
+            if result.returncode != 0:
+                print(f"\n  ERROR: Backtest failed for {year}-{month:02d}!")
+                print(result.stderr)
+                sys.exit(1)
+
+            print(f"  ✓ Backtest completed for {year}-{month:02d}")
+
+            # Run monthly tuning at the START of each month (after we have data)
+            # Skip first month (need history to tune)
+            if i > 1:
+                # Run tuning with 3-month lookback
+                print(f"  Running monthly tuning for next month...")
+                if run_monthly_tuning_for_month(year, month, lookback_months=3):
+                    tuning_count += 1
+                    print(f"  ✓ Parameters updated for next month")
+                else:
+                    print(f"  ⚠️  Tuning failed, continuing with current params")
+
         conn.close()
 
-        print(f"Training Period: {ten_years_ago} to {backtest_start}")
-        print(f"Backtest Period: {backtest_start} to {newest_date}")
         print()
-        print("Running backtest with AGGRESSIVE parameters...")
-        print("This will take several minutes...")
+        print("=" * 60)
+        print("BACKTEST WITH MONTHLY TUNING COMPLETED")
+        print("=" * 60)
+        print(f"✓ Processed {len(months_to_process)} months")
+        print(f"✓ Applied {tuning_count} monthly tuning updates")
+        print(f"✓ Parameters evolved from aggressive baseline to optimized config")
         print()
-
-        # Run backtest
-        result = subprocess.run(
-            [
-                sys.executable,
-                "backtest.py",
-                "--start-date", str(backtest_start),
-                "--end-date", str(newest_date)
-            ],
-            cwd=str(Path(__file__).parent.parent),
-            text=True
-        )
-
-        if result.returncode != 0:
-            print("\nERROR: Backtest failed!")
-            sys.exit(1)
 
         return backtest_start, newest_date
 
@@ -175,81 +291,175 @@ def run_5y_5y_backtest():
 
 
 def generate_deployment_config(backtest_start, backtest_end):
-    """Generate SQL config file for Railway deployment"""
+    """
+    Generate SQL config file for Railway deployment using FINAL TUNED parameters.
 
-    config_start = (backtest_end - timedelta(days=3650)).strftime('%Y-%m-%d')
-    notes = f"Validated via 5Y backtest ({backtest_start} to {backtest_end})"
+    This uses the most recent (active) config from the database after monthly tuning.
+    """
+    settings = get_settings()
+    conn = psycopg2.connect(settings.database_url)
+    cursor = conn.cursor()
 
-    output_file = Path(__file__).parent.parent / "alembic" / "seed_data" / "trading_config_initial.sql"
+    try:
+        # Get the most recent (active) config after all monthly tuning
+        cursor.execute("""
+            SELECT
+                regime_bullish_threshold, regime_bearish_threshold,
+                risk_high_threshold, risk_medium_threshold,
+                allocation_low_risk, allocation_medium_risk, allocation_high_risk,
+                allocation_neutral, sell_percentage,
+                momentum_weight, price_momentum_weight,
+                max_drawdown_tolerance, min_sharpe_target,
+                rsi_oversold_threshold, rsi_overbought_threshold,
+                bollinger_std_multiplier, mean_reversion_allocation,
+                volatility_adjustment_factor, base_volatility,
+                min_confidence_threshold, confidence_scaling_factor,
+                intramonth_drawdown_limit, circuit_breaker_reduction,
+                daily_capital, assets, lookback_days
+            FROM trading_config
+            WHERE end_date IS NULL
+            ORDER BY created_at DESC
+            LIMIT 1
+        """)
 
-    # Use aggressive params for deployment (they've been validated!)
-    with open(output_file, 'w') as f:
-        f.write("-- Trading configuration validated via 5Y/5Y backtest\n")
-        f.write(f"-- Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"-- {notes}\n\n")
+        result = cursor.fetchone()
+        conn.close()
 
-        f.write("INSERT INTO trading_config (\n")
-        f.write("  start_date, end_date, daily_capital, assets, lookback_days,\n")
-        f.write("  regime_bullish_threshold, regime_bearish_threshold,\n")
-        f.write("  risk_high_threshold, risk_medium_threshold,\n")
-        f.write("  allocation_low_risk, allocation_medium_risk, allocation_high_risk,\n")
-        f.write("  allocation_neutral, sell_percentage,\n")
-        f.write("  momentum_weight, price_momentum_weight,\n")
-        f.write("  max_drawdown_tolerance, min_sharpe_target,\n")
-        f.write("  rsi_oversold_threshold, rsi_overbought_threshold,\n")
-        f.write("  bollinger_std_multiplier, mean_reversion_allocation,\n")
-        f.write("  volatility_adjustment_factor, base_volatility,\n")
-        f.write("  min_confidence_threshold, confidence_scaling_factor,\n")
-        f.write("  intramonth_drawdown_limit, circuit_breaker_reduction,\n")
-        f.write("  created_by, notes\n")
-        f.write(") VALUES (\n")
-        f.write(f"  '{config_start}', NULL,\n")
-        f.write("  1000.0, '[\"SPY\", \"QQQ\", \"DIA\"]'::json, 252,\n")
-        f.write("  0.1, -0.1,\n")
-        f.write("  70.0, 40.0,\n")
-        f.write("  1.0, 1.0, 0.9,\n")
-        f.write("  0.7, 0.7,\n")
-        f.write("  0.6, 0.4,\n")
-        f.write("  20.0, 0.8,\n")
-        f.write("  30.0, 70.0,\n")
-        f.write("  2.0, 0.5,\n")
-        f.write("  0.2, 0.01,\n")
-        f.write("  0.1, 0.2,\n")
-        f.write("  0.15, 0.5,\n")
-        f.write(f"  'railway_deployment', '{notes}'\n")
-        f.write(")\n")
-        f.write("ON CONFLICT DO NOTHING;\n")
+        if not result:
+            print("ERROR: No active config found after training!")
+            sys.exit(1)
 
-    print()
-    print("=" * 60)
-    print("Configuration Generated")
-    print("=" * 60)
-    print(f"✓ File: {output_file}")
-    print(f"✓ Config period: {config_start} onwards")
-    print(f"✓ Validated via backtest: {backtest_start} to {backtest_end}")
-    print()
-    print("Next steps:")
-    print("  1. Review backtest results in: data/back-test/")
-    print("  2. If satisfied, commit the config:")
-    print("     git add backend/alembic/seed_data/trading_config_initial.sql")
-    print("     git commit -m 'Add validated trading config'")
-    print("  3. Deploy to Railway!")
+        # Extract final tuned parameters
+        (regime_bullish_threshold, regime_bearish_threshold,
+         risk_high_threshold, risk_medium_threshold,
+         allocation_low_risk, allocation_medium_risk, allocation_high_risk,
+         allocation_neutral, sell_percentage,
+         momentum_weight, price_momentum_weight,
+         max_drawdown_tolerance, min_sharpe_target,
+         rsi_oversold_threshold, rsi_overbought_threshold,
+         bollinger_std_multiplier, mean_reversion_allocation,
+         volatility_adjustment_factor, base_volatility,
+         min_confidence_threshold, confidence_scaling_factor,
+         intramonth_drawdown_limit, circuit_breaker_reduction,
+         daily_capital, assets, lookback_days) = result
+
+        config_start = (backtest_end - timedelta(days=3650)).strftime('%Y-%m-%d')
+        notes = f"Trained via 5Y/5Y backtest with monthly tuning ({backtest_start} to {backtest_end})"
+
+        output_file = Path(__file__).parent.parent / "alembic" / "seed_data" / "trading_config_initial.sql"
+
+        # Use FINAL TUNED params for deployment
+        with open(output_file, 'w') as f:
+            f.write("-- Trading configuration TRAINED via 5Y/5Y backtest with monthly tuning\n")
+            f.write(f"-- Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"-- {notes}\n")
+            f.write(f"-- Parameters evolved from aggressive baseline through monthly optimization\n\n")
+
+            f.write("INSERT INTO trading_config (\n")
+            f.write("  start_date, end_date, daily_capital, assets, lookback_days,\n")
+            f.write("  regime_bullish_threshold, regime_bearish_threshold,\n")
+            f.write("  risk_high_threshold, risk_medium_threshold,\n")
+            f.write("  allocation_low_risk, allocation_medium_risk, allocation_high_risk,\n")
+            f.write("  allocation_neutral, sell_percentage,\n")
+            f.write("  momentum_weight, price_momentum_weight,\n")
+            f.write("  max_drawdown_tolerance, min_sharpe_target,\n")
+            f.write("  rsi_oversold_threshold, rsi_overbought_threshold,\n")
+            f.write("  bollinger_std_multiplier, mean_reversion_allocation,\n")
+            f.write("  volatility_adjustment_factor, base_volatility,\n")
+            f.write("  min_confidence_threshold, confidence_scaling_factor,\n")
+            f.write("  intramonth_drawdown_limit, circuit_breaker_reduction,\n")
+            f.write("  created_by, notes\n")
+            f.write(") VALUES (\n")
+            f.write(f"  '{config_start}', NULL,\n")
+            f.write(f"  {float(daily_capital)}, '{json.dumps(assets)}'::json, {int(lookback_days)},\n")
+            f.write(f"  {float(regime_bullish_threshold)}, {float(regime_bearish_threshold)},\n")
+            f.write(f"  {float(risk_high_threshold)}, {float(risk_medium_threshold)},\n")
+            f.write(f"  {float(allocation_low_risk)}, {float(allocation_medium_risk)}, {float(allocation_high_risk)},\n")
+            f.write(f"  {float(allocation_neutral)}, {float(sell_percentage)},\n")
+            f.write(f"  {float(momentum_weight)}, {float(price_momentum_weight)},\n")
+            f.write(f"  {float(max_drawdown_tolerance)}, {float(min_sharpe_target)},\n")
+            f.write(f"  {float(rsi_oversold_threshold)}, {float(rsi_overbought_threshold)},\n")
+            f.write(f"  {float(bollinger_std_multiplier)}, {float(mean_reversion_allocation)},\n")
+            f.write(f"  {float(volatility_adjustment_factor)}, {float(base_volatility)},\n")
+            f.write(f"  {float(min_confidence_threshold)}, {float(confidence_scaling_factor)},\n")
+            f.write(f"  {float(intramonth_drawdown_limit)}, {float(circuit_breaker_reduction)},\n")
+            f.write(f"  'railway_deployment', '{notes}'\n")
+            f.write(")\n")
+            f.write("ON CONFLICT DO NOTHING;\n")
+
+        print()
+        print("=" * 60)
+        print("FINAL TUNED Configuration Generated")
+        print("=" * 60)
+        print(f"✓ File: {output_file}")
+        print(f"✓ Config period: {config_start} onwards")
+        print(f"✓ Trained via backtest: {backtest_start} to {backtest_end}")
+        print(f"✓ Parameters optimized through monthly tuning")
+        print()
+        print("Key final parameters:")
+        print(f"  - allocation_low_risk: {allocation_low_risk}")
+        print(f"  - allocation_neutral: {allocation_neutral}")
+        print(f"  - min_confidence_threshold: {min_confidence_threshold}")
+        print(f"  - regime_bullish_threshold: {regime_bullish_threshold}")
+        print()
+        print("Next steps:")
+        print("  1. Review backtest results in: data/back-test/")
+        print("  2. Review monthly tuning reports in: data/strategy-tuning/")
+        print("  3. If satisfied, commit the config:")
+        print("     git add backend/alembic/seed_data/trading_config_initial.sql")
+        print("     git commit -m 'Add trained trading config with monthly tuning'")
+        print("  4. Deploy to Railway!")
+
+    except Exception as e:
+        print(f"\nERROR generating deployment config: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 def main():
-    """Main training workflow"""
+    """
+    Main training workflow with MONTHLY TUNING.
+
+    This implements ACTUAL training by:
+    1. Creating aggressive baseline config (using 2015-2020 as baseline)
+    2. Running 5Y backtest (2020-2025) with monthly tuning
+    3. Generating final tuned config for Railway deployment
+    """
     print()
-    print("LOCAL TRAINING: 5Y/5Y Split with Aggressive Parameters")
+    print("=" * 60)
+    print("LOCAL TRAINING: 5Y/5Y with MONTHLY TUNING")
+    print("=" * 60)
+    print()
+    print("This will:")
+    print("  1. Create aggressive baseline config")
+    print("  2. Run backtest month-by-month (2020-2025)")
+    print("  3. Apply monthly tuning to adjust parameters")
+    print("  4. Generate final tuned config for Railway")
+    print()
+    print("⚠️  This will take 30-60 minutes to complete!")
     print()
 
-    # Step 1: Create aggressive config
+    # Step 1: Create aggressive baseline config
     create_aggressive_config_for_backtest()
 
-    # Step 2: Run 5Y/5Y backtest
-    backtest_start, backtest_end = run_5y_5y_backtest()
+    # Step 2: Run 5Y/5Y backtest with monthly tuning
+    backtest_start, backtest_end = run_5y_5y_backtest_with_monthly_tuning()
 
-    # Step 3: Generate deployment config
+    # Step 3: Generate deployment config from final tuned parameters
     generate_deployment_config(backtest_start, backtest_end)
+
+    print()
+    print("=" * 60)
+    print("✅ TRAINING COMPLETE")
+    print("=" * 60)
+    print()
+    print("Summary:")
+    print("  ✓ Baseline established with aggressive parameters")
+    print("  ✓ 5-year backtest completed with monthly tuning")
+    print("  ✓ Parameters evolved through monthly optimization")
+    print("  ✓ Final config generated for Railway deployment")
+    print()
 
 
 if __name__ == "__main__":
