@@ -683,14 +683,47 @@ class StrategyTuner:
             new_params.regime_bullish_threshold = max(0.2, new_params.regime_bullish_threshold - 0.05)
             print(f"  ✨ Sharpe ratio ({sharpe:.2f}) strong - can be more aggressive")
 
-        # 5. Adjust sell strategy based on bearish performance
+        # 5. Adjust sell strategy based on performance - ENHANCED
+        sell_evals = [e for e in evaluations if e.action == 'SELL']
         bearish_evals = [e for e in evaluations if e.regime == 'bearish']
+
+        # Analyze SELL action effectiveness
+        if sell_evals:
+            sell_effectiveness = sum(1 for e in sell_evals if e.score > 0) / len(sell_evals)
+            avg_sell_score = sum(e.score for e in sell_evals) / len(sell_evals)
+
+            # Check if sells avoided drawdowns
+            sells_avoided_dd = sum(1 for e in sell_evals if e.contribution_to_drawdown < 5) / len(sell_evals)
+
+            print(f"\n  📊 SELL Analysis:")
+            print(f"    Sell trades: {len(sell_evals)} ({sell_effectiveness*100:.1f}% effective)")
+            print(f"    Avg score: {avg_sell_score:+.2f}")
+            print(f"    Avoided DD: {sells_avoided_dd*100:.1f}%")
+
+            # If sells are preventing drawdowns well, keep current sell_percentage
+            if sell_effectiveness > 0.7 and sells_avoided_dd > 0.7:
+                print(f"  ✅ SELL strategy working well - maintaining sell_percentage")
+            # If sells aren't effective (scoring poorly), reduce sell frequency
+            elif avg_sell_score < -0.2:
+                new_params.sell_percentage = max(0.3, new_params.sell_percentage - 0.1)
+                print(f"  ⚠️  SELL trades underperforming - decreasing sell_percentage to be more selective")
+            # If not selling enough during bearish periods, increase
+            elif bearish_evals and len(sell_evals) < len(bearish_evals) * 0.3:
+                new_params.sell_percentage = min(0.9, new_params.sell_percentage + 0.1)
+                print(f"  🔻 Not selling enough in bearish periods - increasing sell_percentage")
+
+        # If no sells happened but we had high drawdowns, we need to sell more!
+        elif overall_metrics.get('max_drawdown', 0) > 15:
+            new_params.sell_percentage = min(0.9, new_params.sell_percentage + 0.15)
+            print(f"  ⚠️  High drawdown ({overall_metrics['max_drawdown']:.1f}%) with no SELL trades - significantly increasing sell_percentage")
+
+        # Specific bearish regime handling
         if bearish_evals:
             avg_bearish_score = sum(e.score for e in bearish_evals) / len(bearish_evals)
             if avg_bearish_score < -0.2:
-                # Sell faster in bearish conditions
+                # Poor bearish performance - need faster sells
                 new_params.sell_percentage = min(0.9, new_params.sell_percentage + 0.1)
-                print("  🔻 Poor bearish performance - increasing sell percentage")
+                print(f"  🔻 Poor bearish performance (score: {avg_bearish_score:+.2f}) - increasing sell percentage")
 
         # NEW: 6. Tune confidence-based parameters
         if confidence_analysis:
