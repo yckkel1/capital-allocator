@@ -755,14 +755,8 @@ class StrategyTuner:
                 new_params.rsi_oversold_threshold = max(20.0, new_params.rsi_oversold_threshold - 5)
                 print(f"  📉 Mean reversion signals underperforming - tightening RSI threshold")
 
-        # NEW: 8. Adjust circuit breaker based on intra-month drawdowns
-        circuit_breaker_trades = [e for e in evaluations if e.signal_type == 'circuit_breaker']
-        if circuit_breaker_trades:
-            cb_effectiveness = sum(1 for t in circuit_breaker_trades if t.score > 0) / len(circuit_breaker_trades)
-            if cb_effectiveness < 0.5:
-                # Circuit breaker triggering too late or ineffectively
-                new_params.intramonth_drawdown_limit = max(0.05, new_params.intramonth_drawdown_limit - 0.02)
-                print(f"  ⚠️  Circuit breaker effectiveness low - tightening trigger")
+        # REMOVED: Circuit breaker tuning - strategy should learn from mistakes, not cease operations
+        # Just monitor drawdown and warn in monthly reports
 
         return new_params
 
@@ -923,8 +917,11 @@ class StrategyTuner:
         add(f"💡 RECOMMENDATIONS")
         add(f"{'='*80}\n")
 
-        if overall_metrics.get('max_drawdown', 0) > old_params.max_drawdown_tolerance:
-            add(f"⚠️  Max drawdown exceeded tolerance - consider reviewing position sizing")
+        max_dd = overall_metrics.get('max_drawdown', 0)
+        if max_dd > old_params.max_drawdown_tolerance:
+            add(f"⚠️  WARNING: Max drawdown ({max_dd:.1f}%) exceeded tolerance ({old_params.max_drawdown_tolerance:.0f}%)")
+            add(f"    Strategy continues operating to learn from mistakes")
+            add(f"    Tuning will adjust parameters to improve future performance")
 
         if overall_metrics.get('sharpe_ratio', 0) < old_params.min_sharpe_target:
             add(f"📊 Sharpe ratio below target - focus on risk-adjusted returns")
