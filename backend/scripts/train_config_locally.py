@@ -322,13 +322,21 @@ def run_5y_5y_backtest_with_monthly_tuning():
 
             # Run backtest for this month
             print(f"  Running backtest for {year}-{month:02d}...")
+
+            # Build command - preserve portfolio from month 2 onwards
+            backtest_cmd = [
+                sys.executable,
+                "backtest.py",
+                "--start-date", str(month_start),
+                "--end-date", str(month_end)
+            ]
+
+            # For month 2+, preserve portfolio to accumulate across months
+            if i > 1:
+                backtest_cmd.append("--preserve-portfolio")
+
             result = subprocess.run(
-                [
-                    sys.executable,
-                    "backtest.py",
-                    "--start-date", str(month_start),
-                    "--end-date", str(month_end)
-                ],
+                backtest_cmd,
                 cwd=str(Path(__file__).parent.parent),
                 capture_output=True,
                 text=True

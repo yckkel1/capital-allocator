@@ -52,33 +52,42 @@ class Backtest:
         
         return days
     
-    def clear_backtest_data(self):
-        """Clear any existing backtest data for this date range"""
+    def clear_backtest_data(self, preserve_portfolio: bool = False):
+        """
+        Clear any existing backtest data for this date range
+
+        Args:
+            preserve_portfolio: If True, preserve portfolio state (for month-by-month backtesting)
+        """
         print(f"🧹 Clearing existing data for {self.start_date} to {self.end_date}...")
-        
+
         # Clear signals
         self.cursor.execute("""
-            DELETE FROM daily_signals 
+            DELETE FROM daily_signals
             WHERE trade_date >= %s AND trade_date <= %s
         """, (self.start_date, self.end_date))
-        
+
         # Clear trades
         self.cursor.execute("""
-            DELETE FROM trades 
+            DELETE FROM trades
             WHERE trade_date >= %s AND trade_date <= %s
         """, (self.start_date, self.end_date))
-        
-        # Clear portfolio (reset to clean state)
-        self.cursor.execute("DELETE FROM portfolio")
-        
+
+        # Clear portfolio ONLY if not preserving state
+        if not preserve_portfolio:
+            self.cursor.execute("DELETE FROM portfolio")
+            print("   ✓ Cleared portfolio (starting fresh)")
+        else:
+            print("   ℹ️  Preserved portfolio state (continuing from previous period)")
+
         # Clear performance metrics
         self.cursor.execute("""
-            DELETE FROM performance_metrics 
+            DELETE FROM performance_metrics
             WHERE date >= %s AND date <= %s
         """, (self.start_date, self.end_date))
-        
+
         self.conn.commit()
-        print("   ✓ Cleared signals, trades, portfolio, and performance metrics\n")
+        print("   ✓ Cleared signals, trades, and performance metrics\n")
     
     def generate_signal(self, trade_date: date) -> bool:
         """Generate signal for a specific date"""
@@ -389,46 +398,51 @@ class Backtest:
         
         print(f"💾 Report saved to: {filepath}\n")
     
-    def run(self):
-        """Run complete backtest"""
+    def run(self, preserve_portfolio: bool = False):
+        """
+        Run complete backtest
+
+        Args:
+            preserve_portfolio: If True, continue from existing portfolio (for month-by-month training)
+        """
         print(f"\n{'='*60}")
         print(f"🚀 STARTING BACKTEST: {self.start_date} to {self.end_date}")
         print(f"{'='*60}\n")
-        
+
         # Step 1: Get trading days
         print("📅 Loading trading days...")
         self.trading_days = self.get_trading_days()
         print(f"   Found {len(self.trading_days)} trading days\n")
-        
-        # Step 2: Clear old data
-        self.clear_backtest_data()
-        
+
+        # Step 2: Clear old data (optionally preserve portfolio)
+        self.clear_backtest_data(preserve_portfolio=preserve_portfolio)
+
         # Step 3: Run backtest for each day
         print("🔄 Running daily simulations...\n")
         for i, trade_date in enumerate(self.trading_days, 1):
             print(f"Day {i}/{len(self.trading_days)}: {trade_date}")
-            
+
             # Generate signal
             print("   Generating signal...", end=" ")
             if not self.generate_signal(trade_date):
                 print("❌ FAILED")
                 continue
             print("✓")
-            
+
             # Execute trades
             print("   Executing trades...", end=" ")
             if not self.execute_trades(trade_date):
                 print("❌ FAILED")
                 continue
             print("✓")
-            
+
             # Calculate metrics
             print("   Calculating metrics...", end=" ")
             metrics = self.calculate_daily_metrics(trade_date)
             self.save_daily_metrics(metrics)
             print(f"✓ (Portfolio: ${metrics['total_value']:,.2f}, Return: {metrics['cumulative_return']:+.2f}%)")
             print()
-        
+
         # Step 4: Generate report
         self.generate_report()
 
@@ -438,18 +452,20 @@ def main():
     parser = argparse.ArgumentParser(description='Run backtest over a date range')
     parser.add_argument('--start-date', required=True, help='Start date (YYYY-MM-DD)')
     parser.add_argument('--end-date', required=True, help='End date (YYYY-MM-DD)')
-    
+    parser.add_argument('--preserve-portfolio', action='store_true',
+                        help='Preserve existing portfolio state (for month-by-month training)')
+
     args = parser.parse_args()
-    
+
     try:
         start_date = datetime.strptime(args.start_date, '%Y-%m-%d').date()
         end_date = datetime.strptime(args.end_date, '%Y-%m-%d').date()
-        
+
         if start_date > end_date:
             raise ValueError("Start date must be before end date")
-        
+
         backtest = Backtest(start_date, end_date)
-        backtest.run()
+        backtest.run(preserve_portfolio=args.preserve_portfolio)
         backtest.close()
         return 0
     except Exception as e:

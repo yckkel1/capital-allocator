@@ -216,54 +216,65 @@ class TradeExecutor:
         """
         trades = []
         features_used = signal['features_used']
-        
+
         # Get current positions
         positions = self.get_current_positions()
-        
+
         if not positions:
             print("   No positions to sell")
             return trades
-        
-        # Determine what to sell (this logic should come from signal features_used)
-        # For now, selling based on asset scores if action is SELL
+
+        # Get sell percentage from signal (allocation_pct when action=SELL)
+        allocation_pct = features_used.get('allocation_pct', 0.0)
+        signal_type = features_used.get('signal_type', 'unknown')
+
+        print(f"   Signal type: {signal_type}, Sell percentage: {allocation_pct*100:.0f}%")
+
+        # Get asset scores for ranking which to sell first
         assets = features_used.get('assets', {})
-        
+
+        # Rank assets by score (sell worst performers first)
+        holdings_with_scores = []
         for symbol, pos in positions.items():
             asset_data = assets.get(symbol, {})
             score = asset_data.get('score', 0)
-            
-            # Sell if score is negative or specified in signal
-            if score < 0:
-                # Get opening price
-                opening_price = self.get_opening_price(symbol, execution_date)
-                
-                # Sell 50% of position (can be adjusted)
-                sell_quantity = (pos['quantity'] * Decimal('0.5')).quantize(Decimal('0.0001'))
-                
-                if sell_quantity > 0:
-                    # Record trade (negative quantity for sell)
-                    self.cursor.execute("""
-                        INSERT INTO trades (signal_id, trade_date, executed_at, symbol, action, quantity, price, amount)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        signal_id,
-                        execution_date,
-                        datetime.now(timezone.utc),
-                        symbol,
-                        'SELL',
-                        -sell_quantity,
-                        opening_price,
-                        sell_quantity * opening_price
-                    ))
-                    
-                    trades.append({
-                        'symbol': symbol,
-                        'quantity': sell_quantity,
-                        'price': opening_price,
-                        'side': 'SELL',
-                        'total': sell_quantity * opening_price
-                    })
-        
+            holdings_with_scores.append((symbol, pos, score))
+
+        # Sort by score ascending (worst first)
+        holdings_with_scores.sort(key=lambda x: x[2])
+
+        # Sell the specified percentage of each holding (or all if weakest)
+        for symbol, pos, score in holdings_with_scores:
+            # Get opening price
+            opening_price = self.get_opening_price(symbol, execution_date)
+
+            # Sell based on allocation_pct from signal
+            sell_quantity = (pos['quantity'] * Decimal(str(allocation_pct))).quantize(Decimal('0.0001'))
+
+            if sell_quantity > 0:
+                # Record trade (negative quantity for sell)
+                self.cursor.execute("""
+                    INSERT INTO trades (signal_id, trade_date, executed_at, symbol, action, quantity, price, amount)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    signal_id,
+                    execution_date,
+                    datetime.now(timezone.utc),
+                    symbol,
+                    'SELL',
+                    -sell_quantity,
+                    opening_price,
+                    sell_quantity * opening_price
+                ))
+
+                trades.append({
+                    'symbol': symbol,
+                    'quantity': sell_quantity,
+                    'price': opening_price,
+                    'side': 'SELL',
+                    'total': sell_quantity * opening_price
+                })
+
         self.conn.commit()
         return trades
 
