@@ -54,7 +54,12 @@ This will:
 - Query all price_history records from the last 10 years
 - Generate `backend/alembic/seed_data/price_history_10y.sql` with approximately 7,500+ records
 
-**Note:** This assumes you already have 10 years of price data in your local `price_history` table.
+**Important:** This assumes you already have 10 years of price data in your local `price_history` table.
+
+**Note on Data Sources:** Alpha Vantage free tier only provides last 100 days. For 10 years of historical data, you'll need to either:
+- Use a premium data provider
+- Download historical data from Yahoo Finance, etc.
+- Already have the data in your database
 
 #### 1.2 Generate Initial Trading Configuration
 
