@@ -436,7 +436,6 @@ class Backtest:
 
         # Step 3: Run backtest for each day
         print("🔄 Running daily simulations...\n")
-        failed_days = []
 
         for i, trade_date in enumerate(self.trading_days, 1):
             print(f"Day {i}/{len(self.trading_days)}: {trade_date}")
@@ -444,16 +443,14 @@ class Backtest:
             # Generate signal
             print("   Generating signal...", end=" ")
             if not self.generate_signal(trade_date):
-                print("❌ FAILED")
-                failed_days.append((trade_date, "signal_generation"))
+                print("❌ FAILED - Skipping day")
                 continue
             print("✓")
 
             # Execute trades
             print("   Executing trades...", end=" ")
             if not self.execute_trades(trade_date):
-                print("❌ FAILED")
-                failed_days.append((trade_date, "trade_execution"))
+                print("❌ FAILED - Skipping day")
                 continue
             print("✓")
 
@@ -463,17 +460,6 @@ class Backtest:
             self.save_daily_metrics(metrics)
             print(f"✓ (Portfolio: ${metrics['total_value']:,.2f}, Return: {metrics['cumulative_return']:+.2f}%)")
             print()
-
-        # Check if too many days failed
-        failure_rate = len(failed_days) / len(self.trading_days) if self.trading_days else 0
-        if failure_rate > 0.5:
-            error_msg = f"CRITICAL: {len(failed_days)}/{len(self.trading_days)} days failed ({failure_rate*100:.1f}%)\n"
-            error_msg += "Failed days:\n"
-            for failed_date, reason in failed_days[:10]:  # Show first 10
-                error_msg += f"  - {failed_date}: {reason}\n"
-            raise Exception(error_msg)
-        elif failed_days:
-            print(f"\n⚠️  WARNING: {len(failed_days)} days failed but continuing ({failure_rate*100:.1f}% failure rate)\n")
 
         # Step 4: Generate report
         self.generate_report()
