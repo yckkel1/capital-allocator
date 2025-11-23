@@ -349,6 +349,32 @@ def run_5y_5y_backtest_with_monthly_tuning():
 
             print(f"  ✓ Backtest completed for {year}-{month:02d}")
 
+            # Validate that data was actually generated for this month
+            cursor.execute("""
+                SELECT COUNT(*) FROM performance_metrics
+                WHERE date >= %s AND date <= %s
+            """, (month_start, month_end))
+            metrics_count = cursor.fetchone()[0]
+
+            cursor.execute("""
+                SELECT COUNT(*) FROM trades
+                WHERE trade_date >= %s AND trade_date <= %s
+            """, (month_start, month_end))
+            trades_count = cursor.fetchone()[0]
+
+            if metrics_count == 0:
+                print(f"\n  ❌ CRITICAL ERROR: No performance metrics generated for {year}-{month:02d}!")
+                print(f"     This indicates insufficient price history data.")
+                print(f"     The signal generator needs at least 60 days of historical data before {month_start}.")
+                print(f"\n     Solution:")
+                print(f"     1. Ensure you have price history data starting at least 60 days before {month_start}")
+                print(f"     2. Check: SELECT MIN(date), MAX(date) FROM price_history;")
+                print(f"     3. If needed, run: python scripts/fetch_data_yahoo.py --days 3650")
+                print(f"\n     Cannot continue training without data.")
+                sys.exit(1)
+
+            print(f"  ✓ Generated {metrics_count} days of metrics and {trades_count} trades")
+
             # Run monthly tuning at the START of each month (after we have data)
             # Skip first month (need history to tune)
             if i > 1:

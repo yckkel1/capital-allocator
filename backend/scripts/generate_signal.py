@@ -600,8 +600,9 @@ def generate_signal(trade_date: date = None):
             print(f"  RSI: {features['rsi']:.1f} | BB Position: {features['bollinger_position']:.2f}")
 
         if not features_by_asset:
-            print("ERROR: No data available for any assets")
-            return
+            error_msg = f"ERROR: No data available for any assets on {trade_date}. Need at least 60 days of price history."
+            print(error_msg)
+            raise ValueError(error_msg)
 
         # Step 1: Detect market regime
         regime_score = calculate_regime(features_by_asset)
