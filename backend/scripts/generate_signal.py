@@ -828,17 +828,24 @@ def generate_signal(trade_date: date = None):
         action_type = action
 
         if action == "BUY":
-            buy_amount = trading_config.daily_capital * adjusted_allocation
+            # CRITICAL FIX: Use accumulated cash + today's capital for buying
+            # This ensures we deploy cash reserves built up during defensive selling
+            available_cash = cash_balance + trading_config.daily_capital
+
+            # Deploy a portion of available cash based on allocation percentage
+            buy_amount = available_cash * adjusted_allocation
             allocations = allocate_diversified(asset_scores, buy_amount)
 
-            print(f"\nBuy Allocations (Total: ${buy_amount:.2f}):")
+            print(f"\nBuy Allocations:")
+            print(f"  Available Cash: ${available_cash:,.2f} (accumulated: ${cash_balance:,.2f} + daily: ${trading_config.daily_capital:,.2f})")
+            print(f"  Deploying {adjusted_allocation*100:.0f}%: ${buy_amount:,.2f}")
             for symbol, amount in sorted(allocations.items(), key=lambda x: x[1], reverse=True):
                 if amount > 0:
-                    print(f"  {symbol}: ${amount:.2f} ({amount/buy_amount*100:.1f}%)")
+                    print(f"    {symbol}: ${amount:.2f} ({amount/buy_amount*100:.1f}%)")
 
-            cash_kept = trading_config.daily_capital - buy_amount
+            cash_kept = available_cash - buy_amount
             if cash_kept > 0:
-                print(f"  CASH: ${cash_kept:.2f}")
+                print(f"  Cash Reserve: ${cash_kept:,.2f}")
 
         elif action == "SELL":
             if has_holdings:
@@ -854,7 +861,8 @@ def generate_signal(trade_date: date = None):
 
         else:  # HOLD
             allocations = {s: 0.0 for s in trading_config.assets}
-            print(f"\nHolding cash: ${trading_config.daily_capital:.2f}")
+            available_cash = cash_balance + trading_config.daily_capital
+            print(f"\nHolding cash: ${available_cash:,.2f} (accumulated: ${cash_balance:,.2f} + daily: ${trading_config.daily_capital:,.2f})")
 
         # Store signal with enhanced metadata
         signal = DailySignal(
