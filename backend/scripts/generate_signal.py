@@ -305,6 +305,14 @@ def calculate_risk_score(features_by_asset: dict) -> float:
     # Normalize volatility to 0-100 scale (assume typical vol ~0.5% to 2%)
     vol_score = min(100, (avg_vol / 0.02) * 100)
 
+    # Check for recent stability: if last 5 days have low volatility, reduce risk score
+    # This helps system recover faster after market selloffs
+    recent_returns = [f.get('returns_5d', 0) for f in features_by_asset.values()]
+    recent_stability = 1.0 - min(1.0, np.std(recent_returns) / 0.05)  # 0 = volatile, 1 = stable
+
+    # Apply stability discount to volatility score
+    vol_score = vol_score * (1.0 - recent_stability * 0.5)  # Up to 50% reduction if very stable
+
     # Correlation risk: When all assets move together = systemic risk
     momentums = [f['returns_60d'] for f in features_by_asset.values()]
     momentum_std = np.std(momentums)
