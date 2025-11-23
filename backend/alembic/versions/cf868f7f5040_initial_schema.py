@@ -100,6 +100,9 @@ def upgrade() -> None:
         sa.Column('cumulative_return', sa.Float(), nullable=True),
         sa.Column('sharpe_ratio', sa.Float(), nullable=True),
         sa.Column('max_drawdown', sa.Float(), nullable=True),
+        sa.Column('total_grants', sa.Float(), nullable=True),
+        sa.Column('lifetime_return', sa.Float(), nullable=True),
+        sa.Column('lifetime_return_pct', sa.Float(), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('date')
