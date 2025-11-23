@@ -490,8 +490,29 @@ class Backtest:
                     self.cursor.execute("SELECT quantity FROM portfolio WHERE symbol = 'CASH'")
                     cash_row = self.cursor.fetchone()
                     cash_before_daily = Decimal(str(cash_row['quantity'])) - self.daily_budget if cash_row else Decimal(0)
+                    available_cash = cash_before_daily + self.daily_budget
 
-                    print(f"✓ (BUY ${actual_buy_amount:,.0f} = {allocation_pct*100:.0f}% of ${cash_before_daily + self.daily_budget:,.0f} available)")
+                    # Get capital scaling details if available
+                    final_allocation_pct = features.get('final_allocation_pct', allocation_pct)
+                    capital_scale_factor = features.get('capital_scale_factor', 1.0)
+                    half_kelly_pct = features.get('half_kelly_pct', 0.0)
+
+                    # Build display string
+                    display_parts = [f"BUY ${actual_buy_amount:,.0f}"]
+
+                    # Show allocation breakdown if capital scaling was applied
+                    if capital_scale_factor < 1.0:
+                        display_parts.append(f"base:{allocation_pct*100:.0f}%")
+                        if half_kelly_pct > 0:
+                            display_parts.append(f"kelly:{half_kelly_pct*100:.0f}%")
+                        display_parts.append(f"scale:{capital_scale_factor:.2f}x")
+                        display_parts.append(f"→{final_allocation_pct*100:.0f}%")
+                    else:
+                        display_parts.append(f"{final_allocation_pct*100:.0f}%")
+
+                    display_parts.append(f"of ${available_cash:,.0f}")
+
+                    print(f"✓ ({' '.join(display_parts)})")
                 elif action == 'SELL':
                     print(f"✓ (SELL {allocation_pct*100:.0f}% of each position | {signal_type})")
                 elif action == 'HOLD':
