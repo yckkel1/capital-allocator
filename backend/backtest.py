@@ -164,6 +164,20 @@ class Backtest:
         # Total value = portfolio holdings + cash
         total_value = portfolio_value + cash_balance
 
+        # Calculate LIFETIME total grants (all trading days up to now)
+        self.cursor.execute("""
+            SELECT COUNT(*) as total_days
+            FROM performance_metrics
+            WHERE date <= %s
+        """, (trade_date,))
+        days_result = self.cursor.fetchone()
+        total_trading_days = days_result['total_days'] if days_result else 0
+        total_grants = self.daily_budget * Decimal(str(total_trading_days))
+
+        # LIFETIME P&L using simple formula: (total_portfolio - total_grants) / total_grants
+        lifetime_return = total_value - total_grants
+        lifetime_return_pct = (lifetime_return / total_grants * 100) if total_grants > 0 else Decimal(0)
+
         # Daily return (vs previous day)
         self.cursor.execute("""
             SELECT total_value
@@ -181,30 +195,16 @@ class Backtest:
             # First day ever - no previous value, assume 0% return
             daily_return = Decimal(0)
 
-        # Cumulative return from start of THIS backtest period
-        self.cursor.execute("""
-            SELECT total_value
-            FROM performance_metrics
-            WHERE date < %s
-            ORDER BY date DESC
-            LIMIT 1
-        """, (self.start_date,))
-        start_result = self.cursor.fetchone()
-
-        if start_result:
-            start_value = Decimal(str(start_result['total_value']))
-            cumulative_return = ((total_value - start_value) / start_value * 100) if start_value > 0 else Decimal(0)
-        else:
-            # First period ever
-            cumulative_return = Decimal(0)
-
         return {
             'date': trade_date,
             'portfolio_value': portfolio_value,
             'cash_balance': cash_balance,
             'total_value': total_value,
+            'total_grants': total_grants,
             'daily_return': daily_return,
-            'cumulative_return': cumulative_return
+            'cumulative_return': lifetime_return_pct,  # Use lifetime for backward compat
+            'lifetime_return': lifetime_return,
+            'lifetime_return_pct': lifetime_return_pct
         }
     
     def save_daily_metrics(self, metrics: Dict):
@@ -261,39 +261,41 @@ class Backtest:
         # Calculate summary stats
         total_days = len(metrics)
 
-        # Get starting total value (before this backtest period)
-        self.cursor.execute("""
-            SELECT total_value
-            FROM performance_metrics
-            WHERE date < %s
-            ORDER BY date DESC
-            LIMIT 1
-        """, (self.start_date,))
-        start_result = self.cursor.fetchone()
-        starting_value = Decimal(str(start_result['total_value'])) if start_result else Decimal(0)
-
-        # Final total value (portfolio + cash) comes from portfolio table
+        # Get LIFETIME totals from last day metrics
         final_value = Decimal(str(last_day['total_value']))
         final_cash = Decimal(str(last_day['cash_balance']))
         final_portfolio = Decimal(str(last_day['portfolio_value']))
 
-        # Capital injected this period
-        capital_injected_this_period = self.daily_budget * total_days
+        # Calculate LIFETIME total grants (all trading days EVER, not just this period)
+        self.cursor.execute("""
+            SELECT COUNT(*) as total_days_ever
+            FROM performance_metrics
+            WHERE date <= %s
+        """, (last_day['date'],))
+        days_result = self.cursor.fetchone()
+        total_trading_days_ever = days_result['total_days_ever'] if days_result else 0
+        total_grants = self.daily_budget * Decimal(str(total_trading_days_ever))
 
-        # Total account value = final_value (already includes cash + portfolio)
-        total_account_value = final_value
-
-        # P&L this period = ending value - (starting value + capital injected)
-        account_return = total_account_value - (starting_value + capital_injected_this_period)
-        account_return_pct = (account_return / (starting_value + capital_injected_this_period) * 100) if (starting_value + capital_injected_this_period) > 0 else Decimal(0)
+        # LIFETIME P&L using simple formula: (total_portfolio - total_grants) / total_grants
+        lifetime_return = final_value - total_grants
+        lifetime_return_pct = (lifetime_return / total_grants * 100) if total_grants > 0 else Decimal(0)
 
         # Calculate benchmark returns (100% invested in single asset daily)
+        # Use LIFETIME calculation: buy $1000/day for ALL trading days EVER (same as strategy)
         benchmarks = {}
         for symbol in ['SPY', 'QQQ', 'DIA']:
             total_shares = Decimal(0)
 
+            # Get ALL trading days up to last_day (same period as strategy)
+            self.cursor.execute("""
+                SELECT date FROM performance_metrics
+                WHERE date <= %s
+                ORDER BY date
+            """, (last_day['date'],))
+            all_trading_days = [row['date'] for row in self.cursor.fetchall()]
+
             # Simulate buying $1000 worth each trading day at opening price
-            for trade_date in self.trading_days:
+            for trade_date in all_trading_days:
                 self.cursor.execute("""
                     SELECT open_price FROM price_history
                     WHERE symbol = %s AND date = %s
@@ -305,18 +307,20 @@ class Backtest:
                     shares_bought = self.daily_budget / open_price
                     total_shares += shares_bought
 
-            # Value all shares at end date's closing price
+            # Value all shares at last day's closing price
             self.cursor.execute("""
                 SELECT close_price FROM price_history
                 WHERE symbol = %s AND date = %s
-            """, (symbol, self.end_date))
+            """, (symbol, last_day['date']))
             end_row = self.cursor.fetchone()
 
             if end_row:
                 end_price = Decimal(str(end_row['close_price']))
                 benchmark_value = total_shares * end_price
-                benchmark_return = benchmark_value - (starting_value + capital_injected_this_period)
-                benchmark_return_pct = (benchmark_return / (starting_value + capital_injected_this_period) * 100) if (starting_value + capital_injected_this_period) > 0 else Decimal(0)
+
+                # LIFETIME P&L using simple formula: (total_portfolio - total_grants) / total_grants
+                benchmark_return = benchmark_value - total_grants
+                benchmark_return_pct = (benchmark_return / total_grants * 100) if total_grants > 0 else Decimal(0)
 
                 benchmarks[symbol] = {
                     'value': benchmark_value,
@@ -332,14 +336,14 @@ class Backtest:
         winning_days = sum(1 for m in metrics if m['daily_return'] and m['daily_return'] > 0)
         win_rate = (winning_days / total_days * 100) if total_days > 0 else 0
         
-        print_and_save(f"Trading Days: {total_days}")
-        print_and_save(f"\n💼 ACCOUNT PERFORMANCE (This Period)")
-        print_and_save(f"Starting Value: ${starting_value:,.2f}")
-        print_and_save(f"Capital Injected: ${capital_injected_this_period:,.2f}")
-        print_and_save(f"Ending Value: ${total_account_value:,.2f}")
+        print_and_save(f"Trading Days (This Period): {total_days}")
+        print_and_save(f"Trading Days (Lifetime): {total_trading_days_ever}")
+        print_and_save(f"\n💼 LIFETIME ACCOUNT PERFORMANCE")
+        print_and_save(f"Total Grants: ${total_grants:,.2f}")
+        print_and_save(f"Current Portfolio: ${final_value:,.2f}")
         print_and_save(f"   Holdings: ${final_portfolio:,.2f}")
         print_and_save(f"   Cash: ${final_cash:,.2f}")
-        print_and_save(f"P&L: ${account_return:,.2f} ({account_return_pct:+.2f}%)")
+        print_and_save(f"P&L: ${lifetime_return:,.2f} ({lifetime_return_pct:+.2f}%)")
         
         print_and_save(f"\n📊 BENCHMARK COMPARISON (100% Daily Investment)")
         for symbol, bench in benchmarks.items():
