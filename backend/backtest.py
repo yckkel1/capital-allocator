@@ -467,7 +467,20 @@ class Backtest:
                 print(f"❌ FAILED: {error}")
                 failed_days.append((trade_date, "signal_generation", error))
                 continue
-            print("✓")
+
+            # Get the signal to show what action was decided
+            self.cursor.execute("""
+                SELECT features_used FROM daily_signals
+                WHERE trade_date = %s
+            """, (trade_date,))
+            signal_row = self.cursor.fetchone()
+            if signal_row:
+                features = signal_row['features_used']
+                action = features.get('action', 'UNKNOWN')
+                allocation_pct = features.get('allocation_pct', 0)
+                print(f"✓ ({action}, {allocation_pct*100:.0f}% allocation)")
+            else:
+                print("✓")
 
             # Execute trades
             print("   Executing trades...", end=" ")
