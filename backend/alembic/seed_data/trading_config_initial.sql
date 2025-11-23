@@ -37,7 +37,9 @@ INSERT INTO trading_config (
   diversify_top_asset_max, diversify_top_asset_min, diversify_second_asset_max, diversify_second_asset_min,
   diversify_third_asset_max, diversify_third_asset_min, two_asset_top, two_asset_second,
   -- Volatility & Normalization
-  volatility_normalization_factor, stability_threshold, correlation_risk_base, correlation_risk_multiplier,
+  volatility_normalization_factor, stability_threshold, stability_discount_factor, correlation_risk_base, correlation_risk_multiplier,
+  -- Risk Score Calculation Weights
+  risk_volatility_weight, risk_correlation_weight,
   -- Indicator Periods
   rsi_period, bollinger_period,
   -- Trend Consistency
@@ -95,7 +97,9 @@ INSERT INTO trading_config (
   0.50, 0.40, 0.35, 0.30,
   0.25, 0.15, 0.65, 0.35,
   -- Volatility & Normalization
-  0.02, 0.05, 30.0, 100.0,
+  0.02, 0.05, 0.5, 30.0, 100.0,
+  -- Risk Score Calculation Weights
+  0.7, 0.3,
   -- Indicator Periods
   14, 20,
   -- Trend Consistency

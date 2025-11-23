@@ -131,8 +131,13 @@ class TradingConfig:
     # Volatility & Normalization
     volatility_normalization_factor: float = 0.02
     stability_threshold: float = 0.05
+    stability_discount_factor: float = 0.5
     correlation_risk_base: float = 30.0
     correlation_risk_multiplier: float = 100.0
+
+    # Risk Score Calculation Weights
+    risk_volatility_weight: float = 0.7
+    risk_correlation_weight: float = 0.3
 
     # Indicator Periods
     rsi_period: int = 14

@@ -227,8 +227,12 @@ def upgrade() -> None:
         # Volatility & Normalization
         sa.Column('volatility_normalization_factor', sa.Float(), nullable=False),
         sa.Column('stability_threshold', sa.Float(), nullable=False),
+        sa.Column('stability_discount_factor', sa.Float(), nullable=False),
         sa.Column('correlation_risk_base', sa.Float(), nullable=False),
         sa.Column('correlation_risk_multiplier', sa.Float(), nullable=False),
+        # Risk Score Calculation Weights
+        sa.Column('risk_volatility_weight', sa.Float(), nullable=False),
+        sa.Column('risk_correlation_weight', sa.Float(), nullable=False),
         # Indicator Periods
         sa.Column('rsi_period', sa.Integer(), nullable=False),
         sa.Column('bollinger_period', sa.Integer(), nullable=False),

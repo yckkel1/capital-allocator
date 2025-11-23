@@ -24,20 +24,35 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import SessionLocal
 from models import PriceHistory, DailySignal, Portfolio, PerformanceMetrics
 from config import get_settings, get_trading_config
+from constraints_loader import get_active_strategy_constraints
 
 settings = get_settings()
 trading_config = get_trading_config()
+constraints = get_active_strategy_constraints()
+
+# Mathematical Constants
+PERCENTAGE_MULTIPLIER = 100.0
+RSI_NEUTRAL = 50.0
+RSI_MAX = 100.0
+ANNUAL_TRADING_DAYS = 252
 
 
-def calculate_rsi(prices: pd.Series, period: int = 14) -> float:
+def calculate_rsi(prices: pd.Series, period: int = None) -> float:
     """
     Calculate Relative Strength Index
+
+    Args:
+        prices: Price series
+        period: RSI period (uses trading_config.rsi_period if not specified)
 
     Returns:
         float: RSI value between 0-100
     """
+    if period is None:
+        period = trading_config.rsi_period
+
     if len(prices) < period + 1:
-        return 50.0  # Neutral if insufficient data
+        return RSI_NEUTRAL  # Neutral if insufficient data
 
     deltas = prices.diff()
     gains = deltas.where(deltas > 0, 0.0)
@@ -47,21 +62,31 @@ def calculate_rsi(prices: pd.Series, period: int = 14) -> float:
     avg_loss = losses.tail(period).mean()
 
     if avg_loss == 0:
-        return 100.0
+        return RSI_MAX
 
     rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
+    rsi = PERCENTAGE_MULTIPLIER - (PERCENTAGE_MULTIPLIER / (1 + rs))
 
     return float(rsi)
 
 
-def calculate_bollinger_bands(prices: pd.Series, period: int = 20, num_std: float = 2.0) -> dict:
+def calculate_bollinger_bands(prices: pd.Series, period: int = None, num_std: float = None) -> dict:
     """
     Calculate Bollinger Bands position
+
+    Args:
+        prices: Price series
+        period: Bollinger period (uses trading_config.bollinger_period if not specified)
+        num_std: Standard deviation multiplier (uses trading_config.bollinger_std_multiplier if not specified)
 
     Returns:
         dict with 'upper', 'lower', 'middle', 'position' (-1 to +1 scale)
     """
+    if period is None:
+        period = trading_config.bollinger_period
+    if num_std is None:
+        num_std = trading_config.bollinger_std_multiplier
+
     if len(prices) < period:
         return {'upper': 0, 'lower': 0, 'middle': 0, 'position': 0}
 
@@ -90,7 +115,11 @@ def calculate_bollinger_bands(prices: pd.Series, period: int = 20, num_std: floa
 
 def detect_regime_transition(current_regime_score: float, previous_regime_score: float) -> str:
     """
-    Detect regime transitions for early entry/exit signals
+    Detect regime transitions for early entry/exit signals using tunable thresholds
+
+    Args:
+        current_regime_score: Current regime score
+        previous_regime_score: Previous regime score
 
     Returns:
         str: 'turning_bullish', 'turning_bearish', 'losing_momentum', 'gaining_momentum', 'stable'
@@ -100,16 +129,17 @@ def detect_regime_transition(current_regime_score: float, previous_regime_score:
 
     delta = current_regime_score - previous_regime_score
 
-    # Turning points
-    if current_regime_score > 0.1 and previous_regime_score < -0.1:
+    # Turning points using tunable threshold
+    threshold = trading_config.regime_transition_threshold
+    if current_regime_score > threshold and previous_regime_score < -threshold:
         return 'turning_bullish'
-    elif current_regime_score < -0.1 and previous_regime_score > 0.1:
+    elif current_regime_score < -threshold and previous_regime_score > threshold:
         return 'turning_bearish'
 
-    # Momentum changes within bullish territory
-    if current_regime_score > 0.3 and delta < -0.15:
+    # Momentum changes within bullish territory using tunable thresholds
+    if current_regime_score > trading_config.regime_bullish_threshold and delta < trading_config.momentum_loss_threshold:
         return 'losing_momentum'
-    elif current_regime_score > 0 and delta > 0.15:
+    elif current_regime_score > 0 and delta > trading_config.momentum_gain_threshold:
         return 'gaining_momentum'
 
     return 'stable'
@@ -133,27 +163,40 @@ def calculate_adaptive_threshold(base_threshold: float, current_volatility: floa
 def calculate_confidence_score(regime_score: float, risk_score: float,
                                 trend_consistency: float, mean_reversion_signal: bool) -> float:
     """
-    Calculate overall confidence in the signal (0 to 1)
+    Calculate overall confidence in the signal (0 to 1) using tunable parameters
+
+    This is a CRITICAL function that drives position sizing decisions.
+    All thresholds and weights are now tunable to allow quantitative optimization.
 
     Higher confidence = stronger position sizing
+
+    Args:
+        regime_score: Regime strength score
+        risk_score: Current risk score (0-100)
+        trend_consistency: Trend consistency multiplier
+        mean_reversion_signal: Whether this is a mean reversion signal
+
+    Returns:
+        float: Confidence score (0 to 1)
     """
-    # Base confidence from regime strength
-    regime_confidence = min(1.0, abs(regime_score) / 0.5)
+    # Base confidence from regime strength using tunable divisor
+    regime_confidence = min(1.0, abs(regime_score) / trading_config.regime_confidence_divisor)
 
-    # Risk penalty (high risk = lower confidence)
-    risk_penalty = max(0, (risk_score - 40) / 60)  # 0 at 40, 1 at 100
+    # Risk penalty (high risk = lower confidence) using tunable min/max thresholds
+    risk_penalty = max(0, (risk_score - trading_config.risk_penalty_min) /
+                          (trading_config.risk_penalty_max - trading_config.risk_penalty_min))
 
-    # Trend consistency bonus
-    consistency_bonus = 0.2 if trend_consistency > 1.2 else 0
+    # Trend consistency bonus using tunable threshold and bonus amount
+    consistency_bonus = trading_config.consistency_bonus if trend_consistency > trading_config.trend_consistency_threshold else 0
 
-    # Mean reversion signals have moderate confidence
+    # Mean reversion signals have moderate confidence (tunable)
     if mean_reversion_signal:
-        base_confidence = 0.6
+        base_confidence = trading_config.mean_reversion_base_confidence
     else:
         base_confidence = regime_confidence
 
-    # Combine factors
-    confidence = base_confidence + consistency_bonus - (risk_penalty * 0.3)
+    # Combine factors using tunable risk penalty multiplier
+    confidence = base_confidence + consistency_bonus - (risk_penalty * trading_config.risk_penalty_multiplier)
     confidence = max(0, min(1.0, confidence))
 
     return confidence
@@ -294,7 +337,10 @@ def calculate_regime(features_by_asset: dict) -> float:
 
 def calculate_risk_score(features_by_asset: dict) -> float:
     """
-    Calculate overall market risk level
+    Calculate overall market risk level using tunable weights
+
+    This is a CRITICAL function that drives risk-based allocation decisions.
+    All weights are now tunable to allow quantitative optimization.
 
     Returns:
         float: Risk score (0-100, higher = riskier)
@@ -302,26 +348,28 @@ def calculate_risk_score(features_by_asset: dict) -> float:
     volatilities = [f['volatility'] for f in features_by_asset.values()]
     avg_vol = sum(volatilities) / len(volatilities)
 
-    # Normalize volatility to 0-100 scale (assume typical vol ~0.5% to 2%)
-    vol_score = min(100, (avg_vol / 0.02) * 100)
+    # Normalize volatility to 0-100 scale using tunable normalization factor
+    vol_score = min(PERCENTAGE_MULTIPLIER, (avg_vol / trading_config.volatility_normalization_factor) * PERCENTAGE_MULTIPLIER)
 
     # Check for recent stability: if last 5 days have low volatility, reduce risk score
     # This helps system recover faster after market selloffs
     recent_returns = [f.get('returns_5d', 0) for f in features_by_asset.values()]
-    recent_stability = 1.0 - min(1.0, np.std(recent_returns) / 0.05)  # 0 = volatile, 1 = stable
+    recent_stability = 1.0 - min(1.0, np.std(recent_returns) / trading_config.stability_threshold)  # 0 = volatile, 1 = stable
 
-    # Apply stability discount to volatility score
-    vol_score = vol_score * (1.0 - recent_stability * 0.5)  # Up to 50% reduction if very stable
+    # Apply stability discount using tunable factor
+    vol_score = vol_score * (1.0 - recent_stability * trading_config.stability_discount_factor)
 
     # Correlation risk: When all assets move together = systemic risk
     momentums = [f['returns_60d'] for f in features_by_asset.values()]
     momentum_std = np.std(momentums)
-    correlation_risk = max(0, 30 - momentum_std * 100)  # Low diversity = higher risk
+    correlation_risk = max(0, trading_config.correlation_risk_base - momentum_std * trading_config.correlation_risk_multiplier)
 
-    # Combined risk score
-    risk_score = vol_score * 0.7 + correlation_risk * 0.3
+    # Combined risk score using TUNABLE WEIGHTS
+    # This is the critical formula that was previously hard-coded as 0.7/0.3
+    risk_score = (vol_score * trading_config.risk_volatility_weight +
+                  correlation_risk * trading_config.risk_correlation_weight)
 
-    return min(100, max(0, risk_score))
+    return min(PERCENTAGE_MULTIPLIER, max(0, risk_score))
 
 
 def rank_assets(features_by_asset: dict) -> dict:
@@ -342,26 +390,26 @@ def rank_assets(features_by_asset: dict) -> dict:
         medium_momentum = features.get('returns_20d', 0)
         long_momentum = features['returns_60d']
 
-        # Check if all positive or all negative
+        # Check if all positive or all negative using tunable multipliers
         all_positive = all(m > 0 for m in [short_momentum, medium_momentum, long_momentum])
         all_negative = all(m < 0 for m in [short_momentum, medium_momentum, long_momentum])
-        trend_consistency = 1.5 if (all_positive or all_negative) else 1.0
+        trend_consistency = trading_config.trend_aligned_multiplier if (all_positive or all_negative) else trading_config.trend_mixed_multiplier
 
         # Price momentum relative to moving averages
         price_momentum = (features['price_vs_sma20'] + features['price_vs_sma50']) / 2
 
-        # NEW: Mean reversion bonus
-        rsi = features.get('rsi', 50)
+        # Mean reversion bonus using tunable thresholds and bonuses
+        rsi = features.get('rsi', RSI_NEUTRAL)
         bb_position = features.get('bollinger_position', 0)
 
-        # Oversold assets get a bonus, overbought get a penalty
+        # Oversold assets get a bonus, overbought get a penalty (all tunable)
         mean_reversion_bonus = 0
-        if rsi < trading_config.rsi_oversold_threshold and bb_position < -0.5:
-            mean_reversion_bonus = 0.3  # Strong oversold signal
-        elif rsi < 40 and bb_position < 0:
-            mean_reversion_bonus = 0.1  # Mild oversold
-        elif rsi > trading_config.rsi_overbought_threshold and bb_position > 0.5:
-            mean_reversion_bonus = -0.2  # Overbought penalty
+        if rsi < trading_config.rsi_oversold_threshold and bb_position < trading_config.bb_oversold_threshold:
+            mean_reversion_bonus = trading_config.oversold_strong_bonus  # Strong oversold signal
+        elif rsi < trading_config.rsi_mild_oversold and bb_position < trading_config.bb_mild_oversold:
+            mean_reversion_bonus = trading_config.oversold_mild_bonus  # Mild oversold
+        elif rsi > trading_config.rsi_overbought_threshold and bb_position > trading_config.bb_overbought_threshold:
+            mean_reversion_bonus = trading_config.overbought_penalty  # Overbought penalty
 
         # Composite score
         composite = (
@@ -377,26 +425,27 @@ def rank_assets(features_by_asset: dict) -> dict:
 
 def detect_mean_reversion_opportunity(features_by_asset: dict, regime_score: float) -> tuple:
     """
-    Check if there's a mean reversion opportunity in neutral/mild regimes
+    Check if there's a mean reversion opportunity in neutral/mild regimes using tunable thresholds
 
     Returns:
         tuple: (has_opportunity: bool, opportunity_type: str, assets: list)
     """
-    if abs(regime_score) > 0.4:  # Strong trend - stick with momentum
+    # Strong trend - stick with momentum (tunable threshold)
+    if abs(regime_score) > trading_config.strong_trend_threshold:
         return (False, None, [])
 
     oversold_assets = []
     overbought_assets = []
 
     for symbol, features in features_by_asset.items():
-        rsi = features.get('rsi', 50)
+        rsi = features.get('rsi', RSI_NEUTRAL)
         bb_position = features.get('bollinger_position', 0)
 
-        # Check for oversold bounce opportunity
-        if rsi < trading_config.rsi_oversold_threshold and bb_position < -0.5:
+        # Check for oversold bounce opportunity using tunable thresholds
+        if rsi < trading_config.rsi_oversold_threshold and bb_position < trading_config.bb_oversold_threshold:
             oversold_assets.append(symbol)
-        # Check for overbought reversal
-        elif rsi > trading_config.rsi_overbought_threshold and bb_position > 0.5:
+        # Check for overbought reversal using tunable thresholds
+        elif rsi > trading_config.rsi_overbought_threshold and bb_position > trading_config.bb_overbought_threshold:
             overbought_assets.append(symbol)
 
     if oversold_assets:
@@ -409,9 +458,10 @@ def detect_mean_reversion_opportunity(features_by_asset: dict, regime_score: flo
 
 def detect_downward_pressure(features_by_asset: dict, risk_score: float) -> tuple:
     """
-    Detect sustained downward pressure that warrants defensive action
+    Detect sustained downward pressure using tunable thresholds
 
-    This helps catch market crashes early before they fully register in regime score
+    This helps catch market crashes early before they fully register in regime score.
+    All thresholds are now configurable for quantitative optimization.
 
     Returns:
         tuple: (has_pressure: bool, severity: str, reason: str)
@@ -431,32 +481,32 @@ def detect_downward_pressure(features_by_asset: dict, risk_score: float) -> tupl
         if returns_5d < 0 and returns_20d < 0 and returns_60d < 0:
             negative_momentum_count += 1
 
-        # Check if price is below both key moving averages
+        # Check if price is below both key moving averages (tunable threshold)
         price_vs_sma20 = features.get('price_vs_sma20', 0)
         price_vs_sma50 = features.get('price_vs_sma50', 0)
 
-        if price_vs_sma20 < -0.02 and price_vs_sma50 < -0.02:  # Below by 2%+
+        if price_vs_sma20 < trading_config.price_vs_sma_threshold and price_vs_sma50 < trading_config.price_vs_sma_threshold:
             below_sma_count += 1
 
-        # Check for high volatility + negative short-term momentum
+        # Check for high volatility + negative short-term momentum (tunable thresholds)
         volatility = features.get('volatility', 0)
-        if volatility > 0.015 and returns_5d < -0.03:  # High vol + down >3% in 5 days
+        if volatility > trading_config.high_volatility_threshold and returns_5d < trading_config.negative_return_threshold:
             high_vol_negative_count += 1
 
     # Determine if there's significant downward pressure
-    # Require majority of assets showing negative signals
+    # Require majority of assets showing negative signals (tunable thresholds)
     negative_momentum_pct = negative_momentum_count / total_assets
     below_sma_pct = below_sma_count / total_assets
     high_vol_negative_pct = high_vol_negative_count / total_assets
 
-    # Severe downward pressure: multiple indicators across most assets
-    if (negative_momentum_pct >= 0.67 and below_sma_pct >= 0.67) or \
-       (high_vol_negative_pct >= 0.67 and risk_score > 50):
+    # Severe downward pressure using tunable thresholds
+    if (negative_momentum_pct >= trading_config.severe_pressure_threshold and below_sma_pct >= trading_config.severe_pressure_threshold) or \
+       (high_vol_negative_pct >= trading_config.severe_pressure_threshold and risk_score > trading_config.severe_pressure_risk):
         return (True, "severe", f"Sustained downtrend across {negative_momentum_count}/{total_assets} assets with elevated risk")
 
-    # Moderate downward pressure: concerning signals but not catastrophic
-    elif (negative_momentum_pct >= 0.50 and risk_score > 45) or \
-         (below_sma_pct >= 0.67 and returns_5d < -0.02):
+    # Moderate downward pressure using tunable thresholds
+    elif (negative_momentum_pct >= trading_config.moderate_pressure_threshold and risk_score > trading_config.moderate_pressure_risk) or \
+         (below_sma_pct >= trading_config.severe_pressure_threshold and returns_5d < trading_config.price_vs_sma_threshold):
         return (True, "moderate", f"Emerging downward pressure in {negative_momentum_count}/{total_assets} assets")
 
     return (False, "none", "")
@@ -486,25 +536,24 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
 
     if has_pressure and has_holdings:
         if pressure_severity == "severe":
-            # Severe downward pressure - sell aggressively
-            # Scale down if already heavily defensive (>70% cash) to avoid over-selling
-            if cash_pct > 70:
-                sell_pct = min(0.5, trading_config.sell_percentage * 0.5)  # Sell less if already defensive
+            # Severe downward pressure - sell aggressively using tunable thresholds
+            # Scale down if already heavily defensive to avoid over-selling
+            if cash_pct > trading_config.defensive_cash_threshold:
+                sell_pct = min(trading_config.sell_percentage * trading_config.sell_defensive_multiplier, trading_config.sell_percentage)
             else:
-                sell_pct = min(0.9, trading_config.sell_percentage * 1.2)
+                sell_pct = min(0.9, trading_config.sell_percentage * trading_config.sell_aggressive_multiplier)
             return ("SELL", sell_pct, f"downward_pressure_severe")
-        elif pressure_severity == "moderate" and regime_score < 0.1:
+        elif pressure_severity == "moderate" and regime_score < trading_config.regime_transition_threshold:
             # Moderate pressure in non-bullish regime - reduce exposure unless already very defensive
-            if cash_pct > 70:
+            if cash_pct > trading_config.defensive_cash_threshold:
                 # Already defensive, let normal logic handle it
                 pass
             else:
-                sell_pct = trading_config.sell_percentage * 0.6
+                sell_pct = trading_config.sell_percentage * trading_config.sell_moderate_pressure_multiplier
                 return ("SELL", sell_pct, "downward_pressure_moderate")
 
-    # IMPROVED: Sell aggressively when risk is VERY HIGH (>70), regardless of regime
-    # Lowered from 85 to 70 to be more responsive to risk
-    if risk_score > 70 and has_holdings:
+    # Sell aggressively when risk is VERY HIGH, regardless of regime (tunable threshold)
+    if risk_score > trading_config.extreme_risk_threshold and has_holdings:
         # Risk is very high - sell most holdings
         sell_pct = trading_config.sell_percentage
         return ("SELL", sell_pct, "extreme_risk_protection")
@@ -522,17 +571,16 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
 
     # Neutral regime with mean reversion opportunity
     elif adaptive_bearish_threshold <= regime_score <= adaptive_bullish_threshold:
-        if has_mr_opportunity and mr_type == 'oversold_bounce' and risk_score < 60:
-            # Mean reversion buy opportunity
+        if has_mr_opportunity and mr_type == 'oversold_bounce' and risk_score < trading_config.mean_reversion_max_risk:
+            # Mean reversion buy opportunity (tunable risk threshold)
             allocation_pct = trading_config.mean_reversion_allocation
             return ("BUY", allocation_pct, "mean_reversion_oversold")
-        elif risk_score > 55 and has_holdings:
-            # IMPROVED: High risk in neutral = SELL some holdings
-            # Lowered from 75 to 55 to be more defensive in neutral markets
-            sell_pct = trading_config.sell_percentage * 0.5  # Sell 50% of sell_percentage
+        elif risk_score > trading_config.neutral_deleverage_risk and has_holdings:
+            # High risk in neutral = SELL some holdings (tunable threshold)
+            sell_pct = trading_config.sell_percentage * trading_config.sell_moderate_pressure_multiplier
             return ("SELL", sell_pct, "neutral_high_risk_deleverage")
-        elif risk_score > 50:
-            # IMPROVED: Lowered from 60 to 50 - more willing to sit out risky neutral periods
+        elif risk_score > trading_config.neutral_hold_risk:
+            # Sit out risky neutral periods (tunable threshold)
             return ("HOLD", 0.0, "neutral_high_risk")
         else:
             # Small cautious buy
@@ -540,16 +588,14 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
 
     # Bullish regime
     else:
-        # IMPROVED: Even in bullish, if risk is very high, SELL instead of buying
-        # Lowered from 80 to 65 to be more defensive
-        if risk_score > 65 and has_holdings:
+        # Even in bullish, if risk is very high, SELL instead of buying (tunable threshold)
+        if risk_score > trading_config.bullish_excessive_risk and has_holdings:
             # Risk too high even though bullish - reduce exposure
-            sell_pct = trading_config.sell_percentage * 0.3  # Sell 30% of sell_percentage
+            sell_pct = trading_config.sell_percentage * trading_config.sell_bullish_risk_multiplier
             return ("SELL", sell_pct, "bullish_excessive_risk")
         elif risk_score > trading_config.risk_high_threshold:
-            # High risk in bullish - buy less or hold
-            # IMPROVED: Lowered from 75 to 65 for hold threshold
-            if has_holdings and risk_score > 65:
+            # High risk in bullish - buy less or hold (tunable threshold)
+            if has_holdings and risk_score > trading_config.bullish_excessive_risk:
                 return ("HOLD", 0.0, "bullish_high_risk_hold")
             else:
                 allocation_pct = trading_config.allocation_high_risk
@@ -586,16 +632,16 @@ def allocate_diversified(asset_scores: dict, total_amount: float) -> dict:
     allocations = {}
 
     if len(sorted_assets) >= 3 and all(score > 0 for _, score in sorted_assets[:3]):
-        # All three are positive - diversify
+        # All three are positive - diversify using tunable limits
         total_score = sum(score for _, score in sorted_assets)
 
         # Normalize scores
         weights = [score / total_score for _, score in sorted_assets]
 
-        # Apply concentration limits
-        allocations[sorted_assets[0][0]] = total_amount * min(0.50, max(0.40, weights[0]))
-        allocations[sorted_assets[1][0]] = total_amount * min(0.35, max(0.30, weights[1]))
-        allocations[sorted_assets[2][0]] = total_amount * min(0.25, max(0.15, weights[2]))
+        # Apply concentration limits using tunable parameters
+        allocations[sorted_assets[0][0]] = total_amount * min(trading_config.diversify_top_asset_max, max(trading_config.diversify_top_asset_min, weights[0]))
+        allocations[sorted_assets[1][0]] = total_amount * min(trading_config.diversify_second_asset_max, max(trading_config.diversify_second_asset_min, weights[1]))
+        allocations[sorted_assets[2][0]] = total_amount * min(trading_config.diversify_third_asset_max, max(trading_config.diversify_third_asset_min, weights[2]))
 
         # Normalize to exactly total_amount
         total_allocated = sum(allocations.values())
@@ -603,9 +649,9 @@ def allocate_diversified(asset_scores: dict, total_amount: float) -> dict:
             allocations[symbol] = allocations[symbol] * (total_amount / total_allocated)
 
     elif len(sorted_assets) >= 2 and sorted_assets[1][1] > 0:
-        # Only top 2 are positive
-        allocations[sorted_assets[0][0]] = total_amount * 0.65
-        allocations[sorted_assets[1][0]] = total_amount * 0.35
+        # Only top 2 are positive - use tunable split
+        allocations[sorted_assets[0][0]] = total_amount * trading_config.two_asset_top
+        allocations[sorted_assets[1][0]] = total_amount * trading_config.two_asset_second
         allocations[sorted_assets[2][0]] = 0.0
 
     else:
@@ -631,43 +677,43 @@ def get_previous_regime_score(db: Session, trade_date: date) -> float:
 
 def capital_scaling_adjustment(capital: float) -> float:
     """
-    Calculate capital scaling factor to reduce allocation % as capital grows
+    Calculate capital scaling factor using tunable constraints
 
     This implements the principle that larger capital requires more conservative
-    position sizing due to:
-    - Increased risk of ruin
-    - Market impact and liquidity constraints
-    - Volatility drag on compound returns
-    - Practical risk management limits
+    position sizing. All breakpoints and factors are now database-configurable.
 
     Args:
         capital: Current available capital
 
     Returns:
-        Scaling factor between 0.35 and 1.0
-
-    Breakpoints (Option A):
-    - < $10k: 1.00 (no scaling)
-    - $10k - $50k: Linear from 1.00 to 0.75
-    - $50k - $200k: Linear from 0.75 to 0.50
-    - > $200k: Linear from 0.50 to 0.35 (asymptotic minimum)
+        Scaling factor between constraints.capital_scale_max_reduction and 1.0
     """
-    if capital < 10_000:
+    tier1_threshold = constraints.capital_scale_tier1_threshold
+    tier1_factor = constraints.capital_scale_tier1_factor
+    tier2_threshold = constraints.capital_scale_tier2_threshold
+    tier2_factor = constraints.capital_scale_tier2_factor
+    tier3_threshold = constraints.capital_scale_tier3_threshold
+    tier3_factor = constraints.capital_scale_tier3_factor
+    max_reduction = constraints.capital_scale_max_reduction
+
+    if capital < tier1_threshold:
         # Small capital: No scaling needed
-        return 1.0
-    elif capital < 50_000:
-        # $10k to $50k: Gradual reduction
-        # Linear interpolation: 1.0 at $10k, 0.75 at $50k
-        return 1.0 - ((capital - 10_000) / 40_000) * 0.25
-    elif capital < 200_000:
-        # $50k to $200k: More aggressive reduction
-        # Linear interpolation: 0.75 at $50k, 0.50 at $200k
-        return 0.75 - ((capital - 50_000) / 150_000) * 0.25
+        return tier1_factor
+    elif capital < tier2_threshold:
+        # Tier 1 to Tier 2: Gradual reduction
+        range_size = tier2_threshold - tier1_threshold
+        reduction = tier1_factor - tier2_factor
+        return tier1_factor - ((capital - tier1_threshold) / range_size) * reduction
+    elif capital < tier3_threshold:
+        # Tier 2 to Tier 3: More aggressive reduction
+        range_size = tier3_threshold - tier2_threshold
+        reduction = tier2_factor - tier3_factor
+        return tier2_factor - ((capital - tier2_threshold) / range_size) * reduction
     else:
-        # > $200k: Conservative asymptotic minimum
-        # Approaches 0.35 but never goes below
-        reduction = min(0.15, (capital - 200_000) / 2_000_000)
-        return max(0.35, 0.50 - reduction)
+        # Beyond Tier 3: Conservative asymptotic minimum
+        excess_capital = capital - tier3_threshold
+        additional_reduction = min(tier3_factor - max_reduction, excess_capital / 2_000_000)
+        return max(max_reduction, tier3_factor - additional_reduction)
 
 
 def calculate_half_kelly(db: Session, trade_date: date, lookback_days: int = 60) -> float:
@@ -698,9 +744,14 @@ def calculate_half_kelly(db: Session, trade_date: date, lookback_days: int = 60)
         DailySignal.trade_date < trade_date
     ).all()
 
-    if not trades or len(trades) < 10:
-        # Insufficient data - use conservative default (50% of typical allocation)
-        return 0.5
+    # Constants for Kelly calculation
+    HALF_KELLY_DEFAULT = 0.5
+    DEFAULT_AVG_WIN = 0.05
+    DEFAULT_AVG_LOSS = 0.03
+
+    if not trades or len(trades) < constraints.min_trades_for_kelly:
+        # Insufficient data - use conservative default
+        return HALF_KELLY_DEFAULT
 
     # Calculate win rate and payoff ratio from signals
     wins = 0
@@ -719,23 +770,24 @@ def calculate_half_kelly(db: Session, trade_date: date, lookback_days: int = 60)
         # In a full implementation, we'd track actual P&L
         confidence = features.get('confidence_score', 0.5)
 
-        if confidence > 0.6:
+        # Use tunable kelly_confidence_threshold to determine wins
+        if confidence > constraints.kelly_confidence_threshold:
             wins += 1
             total_win_return += confidence
         else:
             total_loss_return += (1.0 - confidence)
 
-    if total_trades < 10:
-        return 0.5
+    if total_trades < constraints.min_trades_for_kelly:
+        return HALF_KELLY_DEFAULT
 
-    # Calculate statistics
+    # Calculate statistics using default constants
     win_rate = wins / total_trades
-    avg_win = total_win_return / wins if wins > 0 else 0.05
-    avg_loss = total_loss_return / (total_trades - wins) if (total_trades - wins) > 0 else 0.03
+    avg_win = total_win_return / wins if wins > 0 else DEFAULT_AVG_WIN
+    avg_loss = total_loss_return / (total_trades - wins) if (total_trades - wins) > 0 else DEFAULT_AVG_LOSS
 
     # Avoid division by zero
     if avg_loss == 0:
-        avg_loss = 0.03
+        avg_loss = DEFAULT_AVG_LOSS
 
     payoff_ratio = avg_win / avg_loss
 
@@ -785,8 +837,9 @@ def generate_signal(trade_date: date = None):
                 PriceHistory.date >= lookback_start
             ).order_by(PriceHistory.date.asc()).all()
 
-            if len(prices) < 60:
-                print(f"WARNING: Insufficient data for {symbol} ({len(prices)} days)")
+            # Use tunable min_data_days constraint
+            if len(prices) < constraints.min_data_days:
+                print(f"WARNING: Insufficient data for {symbol} ({len(prices)} days, need {constraints.min_data_days})")
                 continue
 
             # Convert to DataFrame
@@ -919,10 +972,8 @@ def generate_signal(trade_date: date = None):
         is_mean_reversion = signal_type.startswith('mean_reversion')
         confidence = calculate_confidence_score(regime_score, risk_score, trend_consistency, is_mean_reversion)
 
-        # Minimum 5% holding at all times
-        # if a) action is BUY and confidence is low OR b) action is HOLD but holding pct too low
-        # we will force buying such that holding pct will reach 5%
-        MIN_HOLDING_THRESHOLD = 10 
+        # Use tunable min_holding_threshold from constraints
+        # If holdings are below threshold, force buying to reach minimum
 
         # Apply confidence-based position sizing
         if action == "BUY":
@@ -934,27 +985,27 @@ def generate_signal(trade_date: date = None):
                 )
                 print(f"Confidence: {confidence:.2f} | Adjusted Allocation: {adjusted_allocation*100:.0f}%")
             else:
-                if holdings_pct >= MIN_HOLDING_THRESHOLD:
+                if holdings_pct >= constraints.min_holding_threshold:
                     adjusted_allocation = 0.0
                     action = "HOLD"
                     signal_type = "low_confidence_skip"
                     print(f"Confidence: {confidence:.2f} < {trading_config.min_confidence_threshold:.2f} - SKIPPING")
-                # Force Action if holding_pct is smaller than hard threshold
-                else: 
-                    adjusted_allocation = MIN_HOLDING_THRESHOLD - holdings_pct    
+                # Force Action if holding_pct is smaller than threshold (tunable)
+                else:
+                    adjusted_allocation = constraints.min_holding_threshold - holdings_pct
         elif action == "SELL":
             adjusted_allocation = allocation_pct
         else:
-            if holdings_pct < MIN_HOLDING_THRESHOLD:
+            if holdings_pct < constraints.min_holding_threshold:
                 action = "BUY"
-                adjusted_allocation = MIN_HOLDING_THRESHOLD - holdings_pct 
+                adjusted_allocation = constraints.min_holding_threshold - holdings_pct
             else:
                 adjusted_allocation = allocation_pct
 
-        # Determine confidence bucket for tracking
-        if confidence >= 0.7:
+        # Determine confidence bucket for tracking using tunable thresholds
+        if confidence >= trading_config.confidence_bucket_high_threshold:
             confidence_bucket = "high"
-        elif confidence >= 0.5:
+        elif confidence >= trading_config.confidence_bucket_medium_threshold:
             confidence_bucket = "medium"
         else:
             confidence_bucket = "low"
@@ -1012,7 +1063,7 @@ def generate_signal(trade_date: date = None):
                     print(f"  Cash Reserve: ${cash_kept:,.2f}")
 
         elif action == "SELL":
-            if has_holdings and holdings_pct >= MIN_HOLDING_THRESHOLD:
+            if has_holdings and holdings_pct >= constraints.min_holding_threshold:
                 holding_scores = {h.symbol: asset_scores.get(h.symbol, -999) for h in holdings}
                 sorted_holdings = sorted(holding_scores.items(), key=lambda x: x[1])
 

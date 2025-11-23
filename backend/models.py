@@ -253,8 +253,13 @@ class TradingConfig(Base):
     # Volatility & Normalization
     volatility_normalization_factor = Column(Float, nullable=False, default=0.02)
     stability_threshold = Column(Float, nullable=False, default=0.05)
+    stability_discount_factor = Column(Float, nullable=False, default=0.5)
     correlation_risk_base = Column(Float, nullable=False, default=30.0)
     correlation_risk_multiplier = Column(Float, nullable=False, default=100.0)
+
+    # Risk Score Calculation Weights
+    risk_volatility_weight = Column(Float, nullable=False, default=0.7)
+    risk_correlation_weight = Column(Float, nullable=False, default=0.3)
 
     # Indicator Periods
     rsi_period = Column(Integer, nullable=False, default=14)
