@@ -501,6 +501,31 @@ class Backtest:
                 continue
             print("✓")
 
+            # Show trade summary
+            self.cursor.execute("""
+                SELECT symbol, action, quantity, amount
+                FROM trades
+                WHERE trade_date = %s AND action != 'HOLD'
+                ORDER BY symbol
+            """, (trade_date,))
+            trades_today = self.cursor.fetchall()
+
+            if trades_today:
+                trade_summary = []
+                for trade in trades_today:
+                    qty = abs(float(trade['quantity']))
+                    action = trade['action']
+                    symbol = trade['symbol']
+                    trade_summary.append(f"{action} {qty:.2f} {symbol}")
+                print(f"      → {', '.join(trade_summary)}")
+
+            # Show cash balance
+            self.cursor.execute("SELECT quantity FROM portfolio WHERE symbol = 'CASH'")
+            cash_row = self.cursor.fetchone()
+            if cash_row:
+                cash_balance = float(cash_row['quantity'])
+                print(f"      💵 Cash: ${cash_balance:,.2f}")
+
             # Calculate metrics
             print("   Calculating metrics...", end=" ")
             metrics = self.calculate_daily_metrics(trade_date, preserve_portfolio=preserve_portfolio)
