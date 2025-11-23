@@ -919,21 +919,37 @@ def generate_signal(trade_date: date = None):
         is_mean_reversion = signal_type.startswith('mean_reversion')
         confidence = calculate_confidence_score(regime_score, risk_score, trend_consistency, is_mean_reversion)
 
+        # Minimum 5% holding at all times
+        # if a) action is BUY and confidence is low OR b) action is HOLD but holding pct too low
+        # we will force buying such that holding pct will reach 5%
+        MIN_HOLDING_THRESHOLD = 10 
+
         # Apply confidence-based position sizing
-        if action == "BUY" and confidence >= trading_config.min_confidence_threshold:
-            adjusted_allocation = calculate_position_size(
-                allocation_pct,
-                confidence,
-                trading_config.confidence_scaling_factor
-            )
-            print(f"Confidence: {confidence:.2f} | Adjusted Allocation: {adjusted_allocation*100:.0f}%")
-        elif action == "BUY" and confidence < trading_config.min_confidence_threshold:
-            adjusted_allocation = 0.0
-            action = "HOLD"
-            signal_type = "low_confidence_skip"
-            print(f"Confidence: {confidence:.2f} < {trading_config.min_confidence_threshold:.2f} - SKIPPING")
-        else:
+        if action == "BUY":
+            if confidence >= trading_config.min_confidence_threshold:
+                adjusted_allocation = calculate_position_size(
+                    allocation_pct,
+                    confidence,
+                    trading_config.confidence_scaling_factor
+                )
+                print(f"Confidence: {confidence:.2f} | Adjusted Allocation: {adjusted_allocation*100:.0f}%")
+            else:
+                if holdings_pct >= MIN_HOLDING_THRESHOLD:
+                    adjusted_allocation = 0.0
+                    action = "HOLD"
+                    signal_type = "low_confidence_skip"
+                    print(f"Confidence: {confidence:.2f} < {trading_config.min_confidence_threshold:.2f} - SKIPPING")
+                # Force Action if holding_pct is smaller than hard threshold
+                else: 
+                    adjusted_allocation = MIN_HOLDING_THRESHOLD - holdings_pct    
+        elif action == "SELL":
             adjusted_allocation = allocation_pct
+        else:
+            if holdings_pct < MIN_HOLDING_THRESHOLD:
+                action = "BUY"
+                adjusted_allocation = MIN_HOLDING_THRESHOLD - holdings_pct 
+            else:
+                adjusted_allocation = allocation_pct
 
         # Determine confidence bucket for tracking
         if confidence >= 0.7:
@@ -971,28 +987,6 @@ def generate_signal(trade_date: date = None):
             # This ensures we never exceed either the strategy allocation or half Kelly
             kelly_limited_allocation = min(base_allocation, half_kelly_pct)
             final_allocation = kelly_limited_allocation * capital_scale_factor
-
-            # CRITICAL: Prevent stalling from overly conservative allocations
-            # If final allocation is too low, it will result in tiny positions or HOLD
-            MIN_ALLOCATION_THRESHOLD = 0.05  # Minimum 5% to deploy
-
-            if final_allocation < MIN_ALLOCATION_THRESHOLD:
-                print(f"\n⚠️  WARNING: Final allocation {final_allocation*100:.1f}% below {MIN_ALLOCATION_THRESHOLD*100:.0f}% threshold")
-                print(f"   Base: {base_allocation*100:.1f}%, Half Kelly: {half_kelly_pct*100:.1f}%, Scale: {capital_scale_factor:.3f}x")
-                print(f"   Options: [1] Use minimum threshold [2] Convert to HOLD")
-
-                # Option 1: Use minimum threshold if we have confidence in the trade
-                if confidence >= 0.6:
-                    final_allocation = MIN_ALLOCATION_THRESHOLD
-                    signal_type += "_min_threshold_applied"
-                    print(f"   → Using minimum {MIN_ALLOCATION_THRESHOLD*100:.0f}% threshold (confidence {confidence:.2f} ≥ 0.6)")
-                else:
-                    # Option 2: Too risky with low confidence - convert to HOLD
-                    action = "HOLD"
-                    signal_type = "allocation_too_low_with_low_confidence"
-                    final_allocation = 0.0
-                    print(f"   → Converting to HOLD (low confidence {confidence:.2f})")
-
             final_allocation_pct = final_allocation  # Store for metadata
 
             # Only proceed with BUY if not converted to HOLD
@@ -1016,12 +1010,9 @@ def generate_signal(trade_date: date = None):
                 cash_kept = available_cash - buy_amount
                 if cash_kept > 0:
                     print(f"  Cash Reserve: ${cash_kept:,.2f}")
-            elif action == "HOLD":
-                # Converted to HOLD due to low allocation
-                allocations = {s: 0.0 for s in trading_config.assets}
 
         elif action == "SELL":
-            if has_holdings:
+            if has_holdings and holdings_pct >= MIN_HOLDING_THRESHOLD:
                 holding_scores = {h.symbol: asset_scores.get(h.symbol, -999) for h in holdings}
                 sorted_holdings = sorted(holding_scores.items(), key=lambda x: x[1])
 
