@@ -478,7 +478,17 @@ class Backtest:
                 features = signal_row['features_used']
                 action = features.get('action', 'UNKNOWN')
                 allocation_pct = features.get('allocation_pct', 0)
-                print(f"✓ ({action}, {allocation_pct*100:.0f}% allocation)")
+                signal_type = features.get('signal_type', '')
+
+                # Make output clearer based on action type
+                if action == 'BUY':
+                    print(f"✓ (BUY ${self.daily_budget * Decimal(str(allocation_pct)):,.0f} = {allocation_pct*100:.0f}% of budget)")
+                elif action == 'SELL':
+                    print(f"✓ (SELL {allocation_pct*100:.0f}% of each position | {signal_type})")
+                elif action == 'HOLD':
+                    print(f"✓ (HOLD | {signal_type})")
+                else:
+                    print(f"✓ ({action})")
             else:
                 print("✓")
 
@@ -490,6 +500,31 @@ class Backtest:
                 failed_days.append((trade_date, "trade_execution", error))
                 continue
             print("✓")
+
+            # Show trade summary
+            self.cursor.execute("""
+                SELECT symbol, action, quantity, amount
+                FROM trades
+                WHERE trade_date = %s AND action != 'HOLD'
+                ORDER BY symbol
+            """, (trade_date,))
+            trades_today = self.cursor.fetchall()
+
+            if trades_today:
+                trade_summary = []
+                for trade in trades_today:
+                    qty = abs(float(trade['quantity']))
+                    action = trade['action']
+                    symbol = trade['symbol']
+                    trade_summary.append(f"{action} {qty:.2f} {symbol}")
+                print(f"      → {', '.join(trade_summary)}")
+
+            # Show cash balance
+            self.cursor.execute("SELECT quantity FROM portfolio WHERE symbol = 'CASH'")
+            cash_row = self.cursor.fetchone()
+            if cash_row:
+                cash_balance = float(cash_row['quantity'])
+                print(f"      💵 Cash: ${cash_balance:,.2f}")
 
             # Calculate metrics
             print("   Calculating metrics...", end=" ")
