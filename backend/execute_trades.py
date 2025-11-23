@@ -443,6 +443,13 @@ class TradeExecutor:
                 
         else:  # HOLD
             print(f"✋ Action: HOLD - No trades executed today")
+
+            # Record HOLD action for tracking
+            self.cursor.execute("""
+                INSERT INTO trades (signal_id, trade_date, action, symbol, quantity, price, total_cost, created_at)
+                VALUES (%s, %s, 'HOLD', 'CASH', 0, 0, 0, %s)
+            """, (signal['id'], execution_date, datetime.now(timezone.utc)))
+            self.conn.commit()
         
         print(f"{'='*60}\n")
 
