@@ -411,7 +411,17 @@ class TradeExecutor:
         # 3. Execute trades based on action
         print(f"\n{'='*60}")
         if action == 'BUY':
-            print(f"🔄 Executing BUY orders (Budget: ${DAILY_BUDGET * Decimal(str(allocation_pct)):,.2f}):\n")
+            current_cash = self.get_cash_balance()
+            target_spend = sum(Decimal(str(v)) for v in signal['allocations'].values() if v > 0)
+
+            print(f"🔄 Executing BUY orders:")
+            print(f"   Available Cash: ${current_cash:,.2f}")
+            print(f"   Target Spend: ${target_spend:,.2f}")
+            if target_spend > DAILY_BUDGET * 2:
+                print(f"   ⚡ Deploying accumulated cash reserves!\n")
+            else:
+                print()
+
             trades = self.execute_buy_trades(signal, signal['id'], execution_date)
 
             if trades:
@@ -422,11 +432,10 @@ class TradeExecutor:
                 for trade in trades:
                     print(f"   ✅ BUY {trade['quantity']:.4f} {trade['symbol']} @ ${trade['price']:.2f} = ${trade['total']:,.2f}")
                 print(f"\n   Total Spent: ${total_spent:,.2f}")
-                print(f"   Cash Held: ${DAILY_BUDGET * Decimal(str(allocation_pct)) - total_spent:,.2f}")
 
                 # Show final cash balance
                 final_cash = self.get_cash_balance()
-                print(f"   💵 Total Cash Balance: ${final_cash:,.2f}")
+                print(f"   💵 Remaining Cash: ${final_cash:,.2f}")
             else:
                 print("   No buy orders executed")
 

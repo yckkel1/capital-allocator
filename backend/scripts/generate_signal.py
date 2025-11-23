@@ -629,6 +629,126 @@ def get_previous_regime_score(db: Session, trade_date: date) -> float:
     return None
 
 
+def capital_scaling_adjustment(capital: float) -> float:
+    """
+    Calculate capital scaling factor to reduce allocation % as capital grows
+
+    This implements the principle that larger capital requires more conservative
+    position sizing due to:
+    - Increased risk of ruin
+    - Market impact and liquidity constraints
+    - Volatility drag on compound returns
+    - Practical risk management limits
+
+    Args:
+        capital: Current available capital
+
+    Returns:
+        Scaling factor between 0.35 and 1.0
+
+    Breakpoints (Option A):
+    - < $10k: 1.00 (no scaling)
+    - $10k - $50k: Linear from 1.00 to 0.75
+    - $50k - $200k: Linear from 0.75 to 0.50
+    - > $200k: Linear from 0.50 to 0.35 (asymptotic minimum)
+    """
+    if capital < 10_000:
+        # Small capital: No scaling needed
+        return 1.0
+    elif capital < 50_000:
+        # $10k to $50k: Gradual reduction
+        # Linear interpolation: 1.0 at $10k, 0.75 at $50k
+        return 1.0 - ((capital - 10_000) / 40_000) * 0.25
+    elif capital < 200_000:
+        # $50k to $200k: More aggressive reduction
+        # Linear interpolation: 0.75 at $50k, 0.50 at $200k
+        return 0.75 - ((capital - 50_000) / 150_000) * 0.25
+    else:
+        # > $200k: Conservative asymptotic minimum
+        # Approaches 0.35 but never goes below
+        reduction = min(0.15, (capital - 200_000) / 2_000_000)
+        return max(0.35, 0.50 - reduction)
+
+
+def calculate_half_kelly(db: Session, trade_date: date, lookback_days: int = 60) -> float:
+    """
+    Calculate half Kelly allocation based on recent trade performance
+
+    Kelly Criterion: f* = (bp - q) / b
+    where:
+    - b = payoff ratio (avg_win / avg_loss)
+    - p = win probability
+    - q = loss probability (1 - p)
+
+    Half Kelly = 0.5 × Kelly for safety margin
+
+    Args:
+        db: Database session
+        trade_date: Current date
+        lookback_days: Days to look back for performance stats
+
+    Returns:
+        Half Kelly allocation percentage (0-1), defaults to 0.5 if insufficient data
+    """
+    lookback_start = trade_date - timedelta(days=lookback_days)
+
+    # Get recent BUY trades with their outcomes
+    trades = db.query(DailySignal).filter(
+        DailySignal.trade_date >= lookback_start,
+        DailySignal.trade_date < trade_date
+    ).all()
+
+    if not trades or len(trades) < 10:
+        # Insufficient data - use conservative default (50% of typical allocation)
+        return 0.5
+
+    # Calculate win rate and payoff ratio from signals
+    wins = 0
+    total_trades = 0
+    total_win_return = 0.0
+    total_loss_return = 0.0
+
+    for signal in trades:
+        features = signal.features_used
+        if not features or features.get('action') != 'BUY':
+            continue
+
+        total_trades += 1
+
+        # Use signal confidence as a proxy for trade quality
+        # In a full implementation, we'd track actual P&L
+        confidence = features.get('confidence_score', 0.5)
+
+        if confidence > 0.6:
+            wins += 1
+            total_win_return += confidence
+        else:
+            total_loss_return += (1.0 - confidence)
+
+    if total_trades < 10:
+        return 0.5
+
+    # Calculate statistics
+    win_rate = wins / total_trades
+    avg_win = total_win_return / wins if wins > 0 else 0.05
+    avg_loss = total_loss_return / (total_trades - wins) if (total_trades - wins) > 0 else 0.03
+
+    # Avoid division by zero
+    if avg_loss == 0:
+        avg_loss = 0.03
+
+    payoff_ratio = avg_win / avg_loss
+
+    # Kelly formula
+    kelly = (win_rate * payoff_ratio - (1 - win_rate)) / payoff_ratio
+
+    # Half Kelly for safety
+    half_kelly = kelly * 0.5
+
+    # Clamp to reasonable range (10% to 80%)
+    return max(0.10, min(0.80, half_kelly))
+
+
 def generate_signal(trade_date: date = None):
     """
     Generate allocation signal for the given trade date using enhanced multi-factor model
@@ -799,21 +919,37 @@ def generate_signal(trade_date: date = None):
         is_mean_reversion = signal_type.startswith('mean_reversion')
         confidence = calculate_confidence_score(regime_score, risk_score, trend_consistency, is_mean_reversion)
 
+        # Minimum 5% holding at all times
+        # if a) action is BUY and confidence is low OR b) action is HOLD but holding pct too low
+        # we will force buying such that holding pct will reach 5%
+        MIN_HOLDING_THRESHOLD = 10 
+
         # Apply confidence-based position sizing
-        if action == "BUY" and confidence >= trading_config.min_confidence_threshold:
-            adjusted_allocation = calculate_position_size(
-                allocation_pct,
-                confidence,
-                trading_config.confidence_scaling_factor
-            )
-            print(f"Confidence: {confidence:.2f} | Adjusted Allocation: {adjusted_allocation*100:.0f}%")
-        elif action == "BUY" and confidence < trading_config.min_confidence_threshold:
-            adjusted_allocation = 0.0
-            action = "HOLD"
-            signal_type = "low_confidence_skip"
-            print(f"Confidence: {confidence:.2f} < {trading_config.min_confidence_threshold:.2f} - SKIPPING")
-        else:
+        if action == "BUY":
+            if confidence >= trading_config.min_confidence_threshold:
+                adjusted_allocation = calculate_position_size(
+                    allocation_pct,
+                    confidence,
+                    trading_config.confidence_scaling_factor
+                )
+                print(f"Confidence: {confidence:.2f} | Adjusted Allocation: {adjusted_allocation*100:.0f}%")
+            else:
+                if holdings_pct >= MIN_HOLDING_THRESHOLD:
+                    adjusted_allocation = 0.0
+                    action = "HOLD"
+                    signal_type = "low_confidence_skip"
+                    print(f"Confidence: {confidence:.2f} < {trading_config.min_confidence_threshold:.2f} - SKIPPING")
+                # Force Action if holding_pct is smaller than hard threshold
+                else: 
+                    adjusted_allocation = MIN_HOLDING_THRESHOLD - holdings_pct    
+        elif action == "SELL":
             adjusted_allocation = allocation_pct
+        else:
+            if holdings_pct < MIN_HOLDING_THRESHOLD:
+                action = "BUY"
+                adjusted_allocation = MIN_HOLDING_THRESHOLD - holdings_pct 
+            else:
+                adjusted_allocation = allocation_pct
 
         # Determine confidence bucket for tracking
         if confidence >= 0.7:
@@ -827,21 +963,56 @@ def generate_signal(trade_date: date = None):
         allocations = {}
         action_type = action
 
+        # Initialize capital scaling variables for tracking
+        capital_scale_factor = 1.0
+        half_kelly_pct = 0.0
+        final_allocation_pct = adjusted_allocation
+
         if action == "BUY":
-            buy_amount = trading_config.daily_capital * adjusted_allocation
-            allocations = allocate_diversified(asset_scores, buy_amount)
+            # CRITICAL FIX: Use accumulated cash + today's capital for buying
+            # This ensures we deploy cash reserves built up during defensive selling
+            available_cash = cash_balance + trading_config.daily_capital
 
-            print(f"\nBuy Allocations (Total: ${buy_amount:.2f}):")
-            for symbol, amount in sorted(allocations.items(), key=lambda x: x[1], reverse=True):
-                if amount > 0:
-                    print(f"  {symbol}: ${amount:.2f} ({amount/buy_amount*100:.1f}%)")
+            # NEW: Apply capital scaling to reduce allocation % for large capital
+            # This implements half Kelly × capital scaling factor
+            capital_scale_factor = capital_scaling_adjustment(available_cash)
 
-            cash_kept = trading_config.daily_capital - buy_amount
-            if cash_kept > 0:
-                print(f"  CASH: ${cash_kept:.2f}")
+            # Calculate half Kelly (if sufficient data available)
+            half_kelly_pct = calculate_half_kelly(db, trade_date)
+
+            # Base allocation from strategy (regime-based decision)
+            base_allocation = adjusted_allocation
+
+            # Apply scaling: min(base_allocation, half_kelly) × capital_factor
+            # This ensures we never exceed either the strategy allocation or half Kelly
+            kelly_limited_allocation = min(base_allocation, half_kelly_pct)
+            final_allocation = kelly_limited_allocation * capital_scale_factor
+            final_allocation_pct = final_allocation  # Store for metadata
+
+            # Only proceed with BUY if not converted to HOLD
+            if action == "BUY" and final_allocation > 0:
+                # Deploy capital with scaled allocation
+                buy_amount = available_cash * final_allocation
+                allocations = allocate_diversified(asset_scores, buy_amount)
+
+                print(f"\nBuy Allocations:")
+                print(f"  Available Cash: ${available_cash:,.2f} (accumulated: ${cash_balance:,.2f} + daily: ${trading_config.daily_capital:,.2f})")
+                print(f"  Base Strategy Allocation: {base_allocation*100:.1f}%")
+                print(f"  Half Kelly Limit: {half_kelly_pct*100:.1f}%")
+                print(f"  Kelly-Limited Allocation: {kelly_limited_allocation*100:.1f}%")
+                print(f"  Capital Scale Factor: {capital_scale_factor:.3f} (capital: ${available_cash:,.0f})")
+                print(f"  → Final Allocation: {final_allocation*100:.1f}% = ${buy_amount:,.2f}")
+
+                for symbol, amount in sorted(allocations.items(), key=lambda x: x[1], reverse=True):
+                    if amount > 0:
+                        print(f"    {symbol}: ${amount:,.2f} ({amount/buy_amount*100:.1f}%)")
+
+                cash_kept = available_cash - buy_amount
+                if cash_kept > 0:
+                    print(f"  Cash Reserve: ${cash_kept:,.2f}")
 
         elif action == "SELL":
-            if has_holdings:
+            if has_holdings and holdings_pct >= MIN_HOLDING_THRESHOLD:
                 holding_scores = {h.symbol: asset_scores.get(h.symbol, -999) for h in holdings}
                 sorted_holdings = sorted(holding_scores.items(), key=lambda x: x[1])
 
@@ -854,7 +1025,8 @@ def generate_signal(trade_date: date = None):
 
         else:  # HOLD
             allocations = {s: 0.0 for s in trading_config.assets}
-            print(f"\nHolding cash: ${trading_config.daily_capital:.2f}")
+            available_cash = cash_balance + trading_config.daily_capital
+            print(f"\nHolding cash: ${available_cash:,.2f} (accumulated: ${cash_balance:,.2f} + daily: ${trading_config.daily_capital:,.2f})")
 
         # Store signal with enhanced metadata
         signal = DailySignal(
@@ -868,6 +1040,10 @@ def generate_signal(trade_date: date = None):
                 "action": action_type,
                 "signal_type": signal_type,
                 "allocation_pct": float(adjusted_allocation),
+                "final_allocation_pct": float(final_allocation_pct),  # NEW: Capital-scaled allocation
+                "capital_scale_factor": float(capital_scale_factor),  # NEW: Scaling factor applied
+                "half_kelly_pct": float(half_kelly_pct),  # NEW: Half Kelly percentage
+                "available_cash": float(cash_balance + trading_config.daily_capital),  # NEW: Available capital
                 "confidence_bucket": confidence_bucket,
                 "adaptive_bullish_threshold": float(adaptive_bullish_threshold),
                 "adaptive_bearish_threshold": float(adaptive_bearish_threshold),
