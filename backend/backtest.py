@@ -89,8 +89,12 @@ class Backtest:
         self.conn.commit()
         print("   ✓ Cleared signals, trades, and performance metrics\n")
     
-    def generate_signal(self, trade_date: date) -> bool:
-        """Generate signal for a specific date"""
+    def generate_signal(self, trade_date: date) -> tuple[bool, str]:
+        """Generate signal for a specific date
+
+        Returns:
+            tuple: (success: bool, error_msg: str)
+        """
         try:
             result = subprocess.run(
                 ["python", "scripts/generate_signal.py", "--date", str(trade_date)],
@@ -99,13 +103,22 @@ class Backtest:
                 text=True,
                 timeout=30
             )
-            return result.returncode == 0
+            if result.returncode == 0:
+                return (True, "")
+            else:
+                # Extract last line of stderr for concise error
+                error_lines = result.stderr.strip().split('\n') if result.stderr else []
+                error_msg = error_lines[-1] if error_lines else "Unknown error"
+                return (False, error_msg)
         except Exception as e:
-            print(f"   ❌ Error generating signal: {e}")
-            return False
-    
-    def execute_trades(self, trade_date: date) -> bool:
-        """Execute trades for a specific date"""
+            return (False, str(e))
+
+    def execute_trades(self, trade_date: date) -> tuple[bool, str]:
+        """Execute trades for a specific date
+
+        Returns:
+            tuple: (success: bool, error_msg: str)
+        """
         try:
             result = subprocess.run(
                 ["python", "execute_trades.py", str(trade_date)],
@@ -114,10 +127,15 @@ class Backtest:
                 text=True,
                 timeout=30
             )
-            return result.returncode == 0
+            if result.returncode == 0:
+                return (True, "")
+            else:
+                # Extract last line of stderr for concise error
+                error_lines = result.stderr.strip().split('\n') if result.stderr else []
+                error_msg = error_lines[-1] if error_lines else "Unknown error"
+                return (False, error_msg)
         except Exception as e:
-            print(f"   ❌ Error executing trades: {e}")
-            return False
+            return (False, str(e))
     
     def calculate_daily_metrics(self, trade_date: date, preserve_portfolio: bool = False) -> Dict:
         """
@@ -436,20 +454,40 @@ class Backtest:
 
         # Step 3: Run backtest for each day
         print("🔄 Running daily simulations...\n")
+        failed_days = []
+        success_count = 0
+
         for i, trade_date in enumerate(self.trading_days, 1):
             print(f"Day {i}/{len(self.trading_days)}: {trade_date}")
 
             # Generate signal
             print("   Generating signal...", end=" ")
-            if not self.generate_signal(trade_date):
-                print("❌ FAILED")
+            success, error = self.generate_signal(trade_date)
+            if not success:
+                print(f"❌ FAILED: {error}")
+                failed_days.append((trade_date, "signal_generation", error))
                 continue
-            print("✓")
+
+            # Get the signal to show what action was decided
+            self.cursor.execute("""
+                SELECT features_used FROM daily_signals
+                WHERE trade_date = %s
+            """, (trade_date,))
+            signal_row = self.cursor.fetchone()
+            if signal_row:
+                features = signal_row['features_used']
+                action = features.get('action', 'UNKNOWN')
+                allocation_pct = features.get('allocation_pct', 0)
+                print(f"✓ ({action}, {allocation_pct*100:.0f}% allocation)")
+            else:
+                print("✓")
 
             # Execute trades
             print("   Executing trades...", end=" ")
-            if not self.execute_trades(trade_date):
-                print("❌ FAILED")
+            success, error = self.execute_trades(trade_date)
+            if not success:
+                print(f"❌ FAILED: {error}")
+                failed_days.append((trade_date, "trade_execution", error))
                 continue
             print("✓")
 
@@ -458,6 +496,17 @@ class Backtest:
             metrics = self.calculate_daily_metrics(trade_date, preserve_portfolio=preserve_portfolio)
             self.save_daily_metrics(metrics)
             print(f"✓ (Portfolio: ${metrics['total_value']:,.2f}, Return: {metrics['cumulative_return']:+.2f}%)")
+            print()
+            success_count += 1
+
+        # Show summary of failures
+        if failed_days:
+            print(f"\n⚠️  BACKTEST SUMMARY: {success_count}/{len(self.trading_days)} days succeeded, {len(failed_days)} failed\n")
+            print("Failed days:")
+            for date, reason, error in failed_days[:5]:  # Show first 5
+                print(f"  - {date} ({reason}): {error}")
+            if len(failed_days) > 5:
+                print(f"  ... and {len(failed_days) - 5} more")
             print()
 
         # Step 4: Generate report
