@@ -194,26 +194,26 @@ def run_continuous_backtest_with_tuning():
 
         # Start trading 365 days after min(date) to have enough historical data
         # (generate_signal needs lookback_days + 30 = 282 days before trade_date)
-        start_date = oldest_date + timedelta(days=365)
-        end_date = newest_date
+        trading_start = oldest_date + timedelta(days=365)
+        trading_end = newest_date
 
         print("=" * 60)
         print("CONTINUOUS BACKTEST WITH MONTHLY TUNING")
         print("=" * 60)
         print()
         print(f"Price History Range: {oldest_date} to {newest_date}")
-        print(f"Trading Period: {start_date} to {end_date}")
+        print(f"Trading Period: {trading_start} to {trading_end}")
         print(f"  (Starting 365 days after min(date) to have enough historical data)")
         print()
 
-        # Create initial config
-        create_initial_config(start_date)
+        # Create initial config - use oldest_date so config is valid for all trading dates
+        create_initial_config(oldest_date)
 
         # Generate list of months to process
-        current_date = start_date
+        current_date = trading_start
         months_to_process = []
 
-        while current_date <= end_date:
+        while current_date <= trading_end:
             months_to_process.append((current_date.year, current_date.month))
             # Move to next month
             if current_date.month == 12:
@@ -301,7 +301,7 @@ def run_continuous_backtest_with_tuning():
         print(f"✓ Applied {tuning_count} tuning updates")
         print()
 
-        return start_date, end_date
+        return trading_start, trading_end
 
     except Exception as e:
         print(f"\nERROR: {e}")
