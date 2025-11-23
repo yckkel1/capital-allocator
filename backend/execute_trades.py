@@ -446,8 +446,8 @@ class TradeExecutor:
 
             # Record HOLD action for tracking
             self.cursor.execute("""
-                INSERT INTO trades (signal_id, trade_date, action, symbol, quantity, price, total_cost, created_at)
-                VALUES (%s, %s, 'HOLD', 'CASH', 0, 0, 0, %s)
+                INSERT INTO trades (signal_id, trade_date, executed_at, symbol, action, quantity, price, amount)
+                VALUES (%s, %s, %s, 'CASH', 'HOLD', 0, 0, 0)
             """, (signal['id'], execution_date, datetime.now(timezone.utc)))
             self.conn.commit()
         

@@ -407,9 +407,65 @@ def detect_mean_reversion_opportunity(features_by_asset: dict, regime_score: flo
     return (False, None, [])
 
 
+def detect_downward_pressure(features_by_asset: dict, risk_score: float) -> tuple:
+    """
+    Detect sustained downward pressure that warrants defensive action
+
+    This helps catch market crashes early before they fully register in regime score
+
+    Returns:
+        tuple: (has_pressure: bool, severity: str, reason: str)
+    """
+    # Check multiple assets for consistent negative signals
+    negative_momentum_count = 0
+    below_sma_count = 0
+    high_vol_negative_count = 0
+    total_assets = len(features_by_asset)
+
+    for symbol, features in features_by_asset.items():
+        # Check if all timeframes are negative (sustained downtrend)
+        returns_5d = features.get('returns_5d', 0)
+        returns_20d = features.get('returns_20d', 0)
+        returns_60d = features.get('returns_60d', 0)
+
+        if returns_5d < 0 and returns_20d < 0 and returns_60d < 0:
+            negative_momentum_count += 1
+
+        # Check if price is below both key moving averages
+        price_vs_sma20 = features.get('price_vs_sma20', 0)
+        price_vs_sma50 = features.get('price_vs_sma50', 0)
+
+        if price_vs_sma20 < -0.02 and price_vs_sma50 < -0.02:  # Below by 2%+
+            below_sma_count += 1
+
+        # Check for high volatility + negative short-term momentum
+        volatility = features.get('volatility', 0)
+        if volatility > 0.015 and returns_5d < -0.03:  # High vol + down >3% in 5 days
+            high_vol_negative_count += 1
+
+    # Determine if there's significant downward pressure
+    # Require majority of assets showing negative signals
+    negative_momentum_pct = negative_momentum_count / total_assets
+    below_sma_pct = below_sma_count / total_assets
+    high_vol_negative_pct = high_vol_negative_count / total_assets
+
+    # Severe downward pressure: multiple indicators across most assets
+    if (negative_momentum_pct >= 0.67 and below_sma_pct >= 0.67) or \
+       (high_vol_negative_pct >= 0.67 and risk_score > 50):
+        return (True, "severe", f"Sustained downtrend across {negative_momentum_count}/{total_assets} assets with elevated risk")
+
+    # Moderate downward pressure: concerning signals but not catastrophic
+    elif (negative_momentum_pct >= 0.50 and risk_score > 45) or \
+         (below_sma_pct >= 0.67 and returns_5d < -0.02):
+        return (True, "moderate", f"Emerging downward pressure in {negative_momentum_count}/{total_assets} assets")
+
+    return (False, "none", "")
+
+
 def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
                   mean_reversion_opportunity: tuple, adaptive_bullish_threshold: float,
-                  adaptive_bearish_threshold: float, current_drawdown: float) -> tuple:
+                  adaptive_bearish_threshold: float, current_drawdown: float,
+                  features_by_asset: dict) -> tuple:
     """
     Decide whether to BUY, SELL, or HOLD with enhanced logic
 
@@ -422,9 +478,23 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
 
     # REMOVED: Circuit breaker logic - strategy must continue operating to learn
 
-    # CRITICAL FIX: Sell aggressively when risk is EXTREMELY HIGH (>85), regardless of regime
-    if risk_score > 85 and has_holdings:
-        # Risk is catastrophically high - sell most holdings
+    # NEW: Detect downward pressure early to avoid being caught in market crashes
+    has_pressure, pressure_severity, pressure_reason = detect_downward_pressure(features_by_asset, risk_score)
+
+    if has_pressure and has_holdings:
+        if pressure_severity == "severe":
+            # Severe downward pressure - sell aggressively regardless of regime
+            sell_pct = min(0.9, trading_config.sell_percentage * 1.2)  # Sell more than usual
+            return ("SELL", sell_pct, f"downward_pressure_severe")
+        elif pressure_severity == "moderate" and regime_score < 0.1:
+            # Moderate pressure in non-bullish regime - reduce exposure
+            sell_pct = trading_config.sell_percentage * 0.6
+            return ("SELL", sell_pct, "downward_pressure_moderate")
+
+    # IMPROVED: Sell aggressively when risk is VERY HIGH (>70), regardless of regime
+    # Lowered from 85 to 70 to be more responsive to risk
+    if risk_score > 70 and has_holdings:
+        # Risk is very high - sell most holdings
         sell_pct = trading_config.sell_percentage
         return ("SELL", sell_pct, "extreme_risk_protection")
 
@@ -445,11 +515,13 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
             # Mean reversion buy opportunity
             allocation_pct = trading_config.mean_reversion_allocation
             return ("BUY", allocation_pct, "mean_reversion_oversold")
-        elif risk_score > 75 and has_holdings:
-            # CRITICAL FIX: High risk in neutral = SELL some holdings
+        elif risk_score > 55 and has_holdings:
+            # IMPROVED: High risk in neutral = SELL some holdings
+            # Lowered from 75 to 55 to be more defensive in neutral markets
             sell_pct = trading_config.sell_percentage * 0.5  # Sell 50% of sell_percentage
             return ("SELL", sell_pct, "neutral_high_risk_deleverage")
-        elif risk_score > 60:
+        elif risk_score > 50:
+            # IMPROVED: Lowered from 60 to 50 - more willing to sit out risky neutral periods
             return ("HOLD", 0.0, "neutral_high_risk")
         else:
             # Small cautious buy
@@ -457,14 +529,16 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
 
     # Bullish regime
     else:
-        # CRITICAL FIX: Even in bullish, if risk is very high, SELL instead of buying
-        if risk_score > 80 and has_holdings:
+        # IMPROVED: Even in bullish, if risk is very high, SELL instead of buying
+        # Lowered from 80 to 65 to be more defensive
+        if risk_score > 65 and has_holdings:
             # Risk too high even though bullish - reduce exposure
             sell_pct = trading_config.sell_percentage * 0.3  # Sell 30% of sell_percentage
             return ("SELL", sell_pct, "bullish_excessive_risk")
         elif risk_score > trading_config.risk_high_threshold:
             # High risk in bullish - buy less or hold
-            if has_holdings and risk_score > 75:
+            # IMPROVED: Lowered from 75 to 65 for hold threshold
+            if has_holdings and risk_score > 65:
                 return ("HOLD", 0.0, "bullish_high_risk_hold")
             else:
                 allocation_pct = trading_config.allocation_high_risk
@@ -664,6 +738,12 @@ def generate_signal(trade_date: date = None):
         if mean_reversion_opportunity[0]:
             print(f"\nMean Reversion: {mean_reversion_opportunity[1]} in {mean_reversion_opportunity[2]}")
 
+        # NEW: Step 7b: Check for downward pressure
+        has_pressure, pressure_severity, pressure_reason = detect_downward_pressure(features_by_asset, risk_score)
+        if has_pressure:
+            print(f"\n⚠️  Downward Pressure Detected: {pressure_severity.upper()}")
+            print(f"   Reason: {pressure_reason}")
+
         # Step 8: Check current holdings
         holdings = db.query(Portfolio).filter(Portfolio.quantity > 0).all()
         has_holdings = len(holdings) > 0
@@ -674,7 +754,7 @@ def generate_signal(trade_date: date = None):
             regime_score, risk_score, has_holdings,
             mean_reversion_opportunity,
             adaptive_bullish_threshold, adaptive_bearish_threshold,
-            current_dd
+            current_dd, features_by_asset
         )
         print(f"\nDecision: {action} (allocation: {allocation_pct*100:.0f}%, type: {signal_type})")
 
