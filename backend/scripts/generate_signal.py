@@ -401,23 +401,32 @@ def detect_mean_reversion_opportunity(features_by_asset: dict, regime_score: flo
 
 def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
                   mean_reversion_opportunity: tuple, adaptive_bullish_threshold: float,
-                  adaptive_bearish_threshold: float, circuit_breaker_triggered: bool) -> tuple:
+                  adaptive_bearish_threshold: float, current_drawdown: float) -> tuple:
     """
     Decide whether to BUY, SELL, or HOLD with enhanced logic
+
+    Note: Removed circuit breaker - strategy should learn from mistakes, not cease operations
 
     Returns:
         tuple: (action: str, allocation_pct: float, signal_type: str)
     """
     has_mr_opportunity, mr_type, mr_assets = mean_reversion_opportunity
 
-    # Circuit breaker check - reduce exposure if triggered
-    if circuit_breaker_triggered and has_holdings:
-        return ("SELL", trading_config.circuit_breaker_reduction, "circuit_breaker")
+    # REMOVED: Circuit breaker logic - strategy must continue operating to learn
+
+    # CRITICAL FIX: Sell aggressively when risk is EXTREMELY HIGH (>85), regardless of regime
+    if risk_score > 85 and has_holdings:
+        # Risk is catastrophically high - sell most holdings
+        sell_pct = trading_config.sell_percentage
+        return ("SELL", sell_pct, "extreme_risk_protection")
 
     # Bearish regime
     if regime_score < adaptive_bearish_threshold:
         if has_holdings:
-            sell_pct = min(0.7, abs(regime_score) * 0.8)
+            # Use tunable sell_percentage instead of hardcoded formula
+            # Scale it by how bearish: more bearish = sell more
+            bearish_intensity = abs(regime_score - adaptive_bearish_threshold) / (1.0 - adaptive_bearish_threshold)
+            sell_pct = min(trading_config.sell_percentage, 0.3 + (bearish_intensity * 0.4))
             return ("SELL", sell_pct, "bearish_regime")
         else:
             return ("HOLD", 0.0, "bearish_no_holdings")
@@ -428,6 +437,10 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
             # Mean reversion buy opportunity
             allocation_pct = trading_config.mean_reversion_allocation
             return ("BUY", allocation_pct, "mean_reversion_oversold")
+        elif risk_score > 75 and has_holdings:
+            # CRITICAL FIX: High risk in neutral = SELL some holdings
+            sell_pct = trading_config.sell_percentage * 0.5  # Sell 50% of sell_percentage
+            return ("SELL", sell_pct, "neutral_high_risk_deleverage")
         elif risk_score > 60:
             return ("HOLD", 0.0, "neutral_high_risk")
         else:
@@ -436,14 +449,24 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
 
     # Bullish regime
     else:
-        if risk_score > trading_config.risk_high_threshold:
-            allocation_pct = trading_config.allocation_high_risk
+        # CRITICAL FIX: Even in bullish, if risk is very high, SELL instead of buying
+        if risk_score > 80 and has_holdings:
+            # Risk too high even though bullish - reduce exposure
+            sell_pct = trading_config.sell_percentage * 0.3  # Sell 30% of sell_percentage
+            return ("SELL", sell_pct, "bullish_excessive_risk")
+        elif risk_score > trading_config.risk_high_threshold:
+            # High risk in bullish - buy less or hold
+            if has_holdings and risk_score > 75:
+                return ("HOLD", 0.0, "bullish_high_risk_hold")
+            else:
+                allocation_pct = trading_config.allocation_high_risk
+                return ("BUY", allocation_pct, "bullish_high_risk")
         elif risk_score > trading_config.risk_medium_threshold:
             allocation_pct = trading_config.allocation_medium_risk
+            return ("BUY", allocation_pct, "bullish_medium_risk")
         else:
             allocation_pct = trading_config.allocation_low_risk
-
-        return ("BUY", allocation_pct, "bullish_momentum")
+            return ("BUY", allocation_pct, "bullish_momentum")
 
 
 def allocate_diversified(asset_scores: dict, total_amount: float) -> dict:
@@ -612,12 +635,12 @@ def generate_signal(trade_date: date = None):
         risk_label = "HIGH" if risk_score > 70 else "MEDIUM" if risk_score > 40 else "LOW"
         print(f"Risk Level: {risk_label} ({risk_score:.1f}/100)")
 
-        # Step 5: Check circuit breaker
-        circuit_breaker_triggered, current_dd = check_circuit_breaker(
+        # Step 5: Monitor drawdown (warning only - DO NOT stop operations)
+        _, current_dd = check_circuit_breaker(
             db, trade_date, trading_config.intramonth_drawdown_limit
         )
-        if circuit_breaker_triggered:
-            print(f"  ⚠️  CIRCUIT BREAKER: Intra-month drawdown {current_dd*100:.1f}% exceeds {trading_config.intramonth_drawdown_limit*100:.0f}%")
+        if current_dd > trading_config.intramonth_drawdown_limit:
+            print(f"  ⚠️  WARNING: Intra-month drawdown {current_dd*100:.1f}% exceeds {trading_config.intramonth_drawdown_limit*100:.0f}% - continuing operations")
 
         # Step 6: Rank assets
         asset_scores = rank_assets(features_by_asset)
@@ -642,7 +665,7 @@ def generate_signal(trade_date: date = None):
             regime_score, risk_score, has_holdings,
             mean_reversion_opportunity,
             adaptive_bullish_threshold, adaptive_bearish_threshold,
-            circuit_breaker_triggered
+            current_dd
         )
         print(f"\nDecision: {action} (allocation: {allocation_pct*100:.0f}%, type: {signal_type})")
 
@@ -729,7 +752,6 @@ def generate_signal(trade_date: date = None):
                 "adaptive_bullish_threshold": float(adaptive_bullish_threshold),
                 "adaptive_bearish_threshold": float(adaptive_bearish_threshold),
                 "regime_transition": regime_transition,
-                "circuit_breaker_triggered": circuit_breaker_triggered,
                 "intramonth_drawdown": float(current_dd),
                 "mean_reversion_opportunity": mean_reversion_opportunity[0],
                 "avg_volatility": float(avg_volatility),

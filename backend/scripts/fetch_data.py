@@ -21,28 +21,38 @@ from models import PriceHistory
 from config import get_settings, get_trading_config
 
 settings = get_settings()
-trading_config = get_trading_config()  # Load trading parameters from database
+
+# Default symbols for backfilling (used when trading_config doesn't exist yet)
+DEFAULT_SYMBOLS = ["SPY", "QQQ", "DIA"]
 
 
 def fetch_and_store_prices(target_date: date = None):
     """
     Fetch latest prices for all assets and store in database using Alpha Vantage
-    
+
     Args:
         target_date: Date to fetch (defaults to today)
     """
     if target_date is None:
         target_date = date.today()
-    
+
     db = SessionLocal()
-    
+
+    # Try to load trading config, fall back to defaults if not available
+    try:
+        trading_config = get_trading_config()
+        symbols = trading_config.assets
+    except (ValueError, Exception) as e:
+        print(f"Trading config not available, using default symbols: {DEFAULT_SYMBOLS}")
+        symbols = DEFAULT_SYMBOLS
+
     try:
         print(f"Fetching data for {target_date}...")
-        
+
         # Initialize Alpha Vantage
         ts = TimeSeries(key=settings.alphavantage_api_key, output_format='pandas')
-        
-        for symbol in trading_config.assets:
+
+        for symbol in symbols:
             print(f"  Fetching {symbol}...")
             
             # Check if data already exists
@@ -123,27 +133,40 @@ def fetch_and_store_prices(target_date: date = None):
         db.close()
 
 
-def backfill_historical_data(days: int = 365):
+def backfill_historical_data(days: int = 100):
     """
     Backfill historical data for model training using Alpha Vantage
-    Note: Alpha Vantage free tier has 25 calls/day limit
-    
+    Note: Alpha Vantage FREE tier only provides last 100 days
+
     Args:
-        days: Number of days to backfill (max ~100 for compact, ~20 years for full)
+        days: Number of days to backfill (max 100 for free tier)
     """
-    print(f"Backfilling historical data...")
+    # Try to load trading config, fall back to defaults if not available
+    try:
+        trading_config = get_trading_config()
+        symbols = trading_config.assets
+    except (ValueError, Exception) as e:
+        print(f"Trading config not available, using default symbols: {DEFAULT_SYMBOLS}")
+        symbols = DEFAULT_SYMBOLS
+
+    if days > 100:
+        print(f"WARNING: Alpha Vantage free tier only supports last 100 days")
+        print(f"Requested {days} days, limiting to 100 days")
+        days = 100
+
+    print(f"Backfilling {days} days of historical data...")
     print(f"NOTE: Alpha Vantage free tier allows 5 calls/min, 25 calls/day")
-    print(f"This will take approximately {len(trading_config.assets) * 13} seconds for {len(trading_config.assets)} symbols\n")
-    
+    print(f"This will take approximately {len(symbols) * 13} seconds for {len(symbols)} symbols\n")
+
     db = SessionLocal()
-    
+
     try:
         # Initialize Alpha Vantage
-        # Use 'full' outputsize to get up to 20 years of data
+        # Free tier only supports 'compact' (100 days)
         ts = TimeSeries(key=settings.alphavantage_api_key, output_format='pandas')
-        outputsize = 'full' if days > 100 else 'compact'
-        
-        for symbol in trading_config.assets:
+        outputsize = 'compact'  # Free tier limit
+
+        for symbol in symbols:
             print(f"Fetching {symbol}...")
             
             max_retries = 3
@@ -206,9 +229,9 @@ def backfill_historical_data(days: int = 365):
             
             db.commit()
             print(f"  ✓ Added {count} records for {symbol}")
-            
+
             # Sleep between symbols to respect rate limit (5 calls/min)
-            if symbol != trading_config.assets[-1]:  # Don't sleep after last symbol
+            if symbol != symbols[-1]:  # Don't sleep after last symbol
                 print(f"  Waiting 13 seconds for rate limit...\n")
                 time.sleep(13)
         

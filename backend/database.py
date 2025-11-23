@@ -5,6 +5,11 @@ from config import get_settings
 
 settings = get_settings()
 
+
+def get_database_url() -> str:
+    """Get database URL from settings"""
+    return settings.database_url
+
 # Create database engine
 engine = create_engine(
     settings.database_url,

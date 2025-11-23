@@ -52,33 +52,42 @@ class Backtest:
         
         return days
     
-    def clear_backtest_data(self):
-        """Clear any existing backtest data for this date range"""
+    def clear_backtest_data(self, preserve_portfolio: bool = False):
+        """
+        Clear any existing backtest data for this date range
+
+        Args:
+            preserve_portfolio: If True, preserve portfolio state (for month-by-month backtesting)
+        """
         print(f"🧹 Clearing existing data for {self.start_date} to {self.end_date}...")
-        
+
         # Clear signals
         self.cursor.execute("""
-            DELETE FROM daily_signals 
+            DELETE FROM daily_signals
             WHERE trade_date >= %s AND trade_date <= %s
         """, (self.start_date, self.end_date))
-        
+
         # Clear trades
         self.cursor.execute("""
-            DELETE FROM trades 
+            DELETE FROM trades
             WHERE trade_date >= %s AND trade_date <= %s
         """, (self.start_date, self.end_date))
-        
-        # Clear portfolio (reset to clean state)
-        self.cursor.execute("DELETE FROM portfolio")
-        
+
+        # Clear portfolio ONLY if not preserving state
+        if not preserve_portfolio:
+            self.cursor.execute("DELETE FROM portfolio")
+            print("   ✓ Cleared portfolio (starting fresh)")
+        else:
+            print("   ℹ️  Preserved portfolio state (continuing from previous period)")
+
         # Clear performance metrics
         self.cursor.execute("""
-            DELETE FROM performance_metrics 
+            DELETE FROM performance_metrics
             WHERE date >= %s AND date <= %s
         """, (self.start_date, self.end_date))
-        
+
         self.conn.commit()
-        print("   ✓ Cleared signals, trades, portfolio, and performance metrics\n")
+        print("   ✓ Cleared signals, trades, and performance metrics\n")
     
     def generate_signal(self, trade_date: date) -> bool:
         """Generate signal for a specific date"""
@@ -110,15 +119,29 @@ class Backtest:
             print(f"   ❌ Error executing trades: {e}")
             return False
     
-    def calculate_daily_metrics(self, trade_date: date) -> Dict:
-        """Calculate performance metrics for a given day"""
-        # Get current portfolio value
+    def calculate_daily_metrics(self, trade_date: date, preserve_portfolio: bool = False) -> Dict:
+        """
+        Calculate performance metrics for a given day using portfolio table
+
+        Portfolio table now includes CASH entry, so we simply read current state
+        instead of reconstructing from trades history
+
+        Args:
+            trade_date: Date to calculate metrics for
+            preserve_portfolio: Not used anymore (kept for compatibility)
+        """
+        # Get CASH balance directly from portfolio table
         self.cursor.execute("""
-            SELECT
-                symbol,
-                quantity,
-                avg_cost
+            SELECT quantity FROM portfolio WHERE symbol = 'CASH'
+        """)
+        cash_row = self.cursor.fetchone()
+        cash_balance = Decimal(str(cash_row['quantity'])) if cash_row else Decimal(0)
+
+        # Get all non-CASH positions
+        self.cursor.execute("""
+            SELECT symbol, quantity, avg_cost
             FROM portfolio
+            WHERE symbol != 'CASH' AND quantity > 0
         """)
         positions = self.cursor.fetchall()
 
@@ -130,69 +153,58 @@ class Backtest:
         """, (trade_date,))
         prices = {row['symbol']: Decimal(str(row['close_price'])) for row in self.cursor.fetchall()}
 
-        # Calculate portfolio value
+        # Calculate portfolio value (holdings only, not cash)
         portfolio_value = Decimal(0)
-        total_cost = Decimal(0)
-
         for pos in positions:
             symbol = pos['symbol']
             qty = Decimal(str(pos['quantity']))
-            avg_cost = Decimal(str(pos['avg_cost']))
-
             current_price = prices.get(symbol, Decimal(0))
-            position_value = qty * current_price
-            position_cost = qty * avg_cost
+            portfolio_value += qty * current_price
 
-            portfolio_value += position_value
-            total_cost += position_cost
+        # Total value = portfolio holdings + cash
+        total_value = portfolio_value + cash_balance
 
-        # Calculate total capital injected (sum of all BUY trades up to this date within backtest range)
+        # Calculate LIFETIME total grants (all trading days up to now)
         self.cursor.execute("""
-            SELECT SUM(amount) as total_injected
-            FROM trades
-            WHERE trade_date >= %s AND trade_date <= %s AND action = 'BUY'
-        """, (self.start_date, trade_date))
-        result = self.cursor.fetchone()
-        cash_injected = Decimal(str(result['total_injected'])) if result['total_injected'] else Decimal(0)
+            SELECT COUNT(*) as total_days
+            FROM performance_metrics
+            WHERE date <= %s
+        """, (trade_date,))
+        days_result = self.cursor.fetchone()
+        total_trading_days = days_result['total_days'] if days_result else 0
+        total_grants = self.daily_budget * Decimal(str(total_trading_days))
 
-        # Get cash from sells (within backtest range)
-        self.cursor.execute("""
-            SELECT SUM(amount) as total_proceeds
-            FROM trades
-            WHERE trade_date >= %s AND trade_date <= %s AND action = 'SELL'
-        """, (self.start_date, trade_date))
-        result = self.cursor.fetchone()
-        cash_from_sells = Decimal(str(result['total_proceeds'])) if result['total_proceeds'] else Decimal(0)
-        
-        # Total value = portfolio + cash from sells
-        total_value = portfolio_value + cash_from_sells
-        
-        # Daily return (vs previous day within backtest range)
+        # LIFETIME P&L using simple formula: (total_portfolio - total_grants) / total_grants
+        lifetime_return = total_value - total_grants
+        lifetime_return_pct = (lifetime_return / total_grants * 100) if total_grants > 0 else Decimal(0)
+
+        # Daily return (vs previous day)
         self.cursor.execute("""
             SELECT total_value
             FROM performance_metrics
-            WHERE date >= %s AND date < %s
+            WHERE date < %s
             ORDER BY date DESC
             LIMIT 1
-        """, (self.start_date, trade_date))
+        """, (trade_date,))
         prev_result = self.cursor.fetchone()
-        
+
         if prev_result:
             prev_value = Decimal(str(prev_result['total_value']))
             daily_return = ((total_value - prev_value) / prev_value * 100) if prev_value > 0 else Decimal(0)
         else:
+            # First day ever - no previous value, assume 0% return
             daily_return = Decimal(0)
-        
-        # Cumulative return (vs total injected capital)
-        cumulative_return = ((total_value - cash_injected) / cash_injected * 100) if cash_injected > 0 else Decimal(0)
-        
+
         return {
             'date': trade_date,
             'portfolio_value': portfolio_value,
-            'cash_balance': cash_from_sells,
+            'cash_balance': cash_balance,
             'total_value': total_value,
+            'total_grants': total_grants,
             'daily_return': daily_return,
-            'cumulative_return': cumulative_return
+            'cumulative_return': lifetime_return_pct,  # Use lifetime for backward compat
+            'lifetime_return': lifetime_return,
+            'lifetime_return_pct': lifetime_return_pct
         }
     
     def save_daily_metrics(self, metrics: Dict):
@@ -248,34 +260,42 @@ class Backtest:
         
         # Calculate summary stats
         total_days = len(metrics)
+
+        # Get LIFETIME totals from last day metrics
         final_value = Decimal(str(last_day['total_value']))
-        
+        final_cash = Decimal(str(last_day['cash_balance']))
+        final_portfolio = Decimal(str(last_day['portfolio_value']))
+
+        # Calculate LIFETIME total grants (all trading days EVER, not just this period)
         self.cursor.execute("""
-            SELECT SUM(amount) as total_injected
-            FROM trades
-            WHERE trade_date >= %s AND trade_date <= %s
-            AND action = 'BUY'
-        """, (self.start_date, self.end_date))
-        result = self.cursor.fetchone()
-        total_injected = Decimal(str(result['total_injected'])) if result['total_injected'] else Decimal(0)
-        
-        total_return = final_value - total_injected
-        total_return_pct = (total_return / total_injected * 100) if total_injected > 0 else Decimal(0)
-        
-        # Calculate total account value (including unused cash)
-        total_capital_received = self.daily_budget * total_days
-        unused_cash = total_capital_received - total_injected
-        total_account_value = final_value + unused_cash
-        account_return = total_account_value - total_capital_received
-        account_return_pct = (account_return / total_capital_received * 100) if total_capital_received > 0 else Decimal(0)
+            SELECT COUNT(*) as total_days_ever
+            FROM performance_metrics
+            WHERE date <= %s
+        """, (last_day['date'],))
+        days_result = self.cursor.fetchone()
+        total_trading_days_ever = days_result['total_days_ever'] if days_result else 0
+        total_grants = self.daily_budget * Decimal(str(total_trading_days_ever))
+
+        # LIFETIME P&L using simple formula: (total_portfolio - total_grants) / total_grants
+        lifetime_return = final_value - total_grants
+        lifetime_return_pct = (lifetime_return / total_grants * 100) if total_grants > 0 else Decimal(0)
 
         # Calculate benchmark returns (100% invested in single asset daily)
+        # Use LIFETIME calculation: buy $1000/day for ALL trading days EVER (same as strategy)
         benchmarks = {}
         for symbol in ['SPY', 'QQQ', 'DIA']:
             total_shares = Decimal(0)
 
+            # Get ALL trading days up to last_day (same period as strategy)
+            self.cursor.execute("""
+                SELECT date FROM performance_metrics
+                WHERE date <= %s
+                ORDER BY date
+            """, (last_day['date'],))
+            all_trading_days = [row['date'] for row in self.cursor.fetchall()]
+
             # Simulate buying $1000 worth each trading day at opening price
-            for trade_date in self.trading_days:
+            for trade_date in all_trading_days:
                 self.cursor.execute("""
                     SELECT open_price FROM price_history
                     WHERE symbol = %s AND date = %s
@@ -286,20 +306,22 @@ class Backtest:
                     open_price = Decimal(str(row['open_price']))
                     shares_bought = self.daily_budget / open_price
                     total_shares += shares_bought
-            
-            # Value all shares at end date's closing price
+
+            # Value all shares at last day's closing price
             self.cursor.execute("""
                 SELECT close_price FROM price_history
                 WHERE symbol = %s AND date = %s
-            """, (symbol, self.end_date))
+            """, (symbol, last_day['date']))
             end_row = self.cursor.fetchone()
-            
+
             if end_row:
                 end_price = Decimal(str(end_row['close_price']))
                 benchmark_value = total_shares * end_price
-                benchmark_return = benchmark_value - total_capital_received
-                benchmark_return_pct = (benchmark_return / total_capital_received * 100) if total_capital_received > 0 else Decimal(0)
-                
+
+                # LIFETIME P&L using simple formula: (total_portfolio - total_grants) / total_grants
+                benchmark_return = benchmark_value - total_grants
+                benchmark_return_pct = (benchmark_return / total_grants * 100) if total_grants > 0 else Decimal(0)
+
                 benchmarks[symbol] = {
                     'value': benchmark_value,
                     'return': benchmark_return,
@@ -314,18 +336,14 @@ class Backtest:
         winning_days = sum(1 for m in metrics if m['daily_return'] and m['daily_return'] > 0)
         win_rate = (winning_days / total_days * 100) if total_days > 0 else 0
         
-        print_and_save(f"Trading Days: {total_days}")
-        print_and_save(f"\n💰 ACTIVE INVESTMENT PERFORMANCE")
-        print_and_save(f"Capital Injected: ${total_injected:,.2f}")
-        print_and_save(f"Portfolio Value: ${final_value:,.2f}")
-        print_and_save(f"P&L (Invested): ${total_return:,.2f} ({total_return_pct:+.2f}%)")
-        
-        print_and_save(f"\n💼 TOTAL ACCOUNT PERFORMANCE")
-        print_and_save(f"Total Capital Received: ${total_capital_received:,.2f}")
-        print_and_save(f"   Invested: ${total_injected:,.2f}")
-        print_and_save(f"   Unused Cash: ${unused_cash:,.2f}")
-        print_and_save(f"Total Account Value: ${total_account_value:,.2f}")
-        print_and_save(f"P&L (Total Account): ${account_return:,.2f} ({account_return_pct:+.2f}%)")
+        print_and_save(f"Trading Days (This Period): {total_days}")
+        print_and_save(f"Trading Days (Lifetime): {total_trading_days_ever}")
+        print_and_save(f"\n💼 LIFETIME ACCOUNT PERFORMANCE")
+        print_and_save(f"Total Grants: ${total_grants:,.2f}")
+        print_and_save(f"Current Portfolio: ${final_value:,.2f}")
+        print_and_save(f"   Holdings: ${final_portfolio:,.2f}")
+        print_and_save(f"   Cash: ${final_cash:,.2f}")
+        print_and_save(f"P&L: ${lifetime_return:,.2f} ({lifetime_return_pct:+.2f}%)")
         
         print_and_save(f"\n📊 BENCHMARK COMPARISON (100% Daily Investment)")
         for symbol, bench in benchmarks.items():
@@ -340,16 +358,24 @@ class Backtest:
         print_and_save(f"\n{'='*60}")
         print_and_save("📈 FINAL PORTFOLIO POSITIONS")
         print_and_save(f"{'='*60}\n")
-        
-        self.cursor.execute("SELECT * FROM portfolio ORDER BY symbol")
+
+        # Display CASH first
+        self.cursor.execute("SELECT quantity FROM portfolio WHERE symbol = 'CASH'")
+        cash_row = self.cursor.fetchone()
+        if cash_row:
+            cash_amount = Decimal(str(cash_row['quantity']))
+            print_and_save(f"CASH: ${cash_amount:,.2f}\n")
+
+        # Display asset positions
+        self.cursor.execute("SELECT * FROM portfolio WHERE symbol != 'CASH' AND quantity > 0 ORDER BY symbol")
         positions = self.cursor.fetchall()
-        
+
         if positions:
             for pos in positions:
                 symbol = pos['symbol']
                 qty = Decimal(str(pos['quantity']))
                 avg_cost = Decimal(str(pos['avg_cost']))
-                
+
                 # Get final price
                 self.cursor.execute("""
                     SELECT close_price FROM price_history
@@ -357,16 +383,16 @@ class Backtest:
                 """, (symbol, last_day['date']))
                 price_row = self.cursor.fetchone()
                 current_price = Decimal(str(price_row['close_price'])) if price_row else Decimal(0)
-                
+
                 current_value = qty * current_price
                 cost_basis = qty * avg_cost
                 pnl = current_value - cost_basis
                 pnl_pct = (pnl / cost_basis * 100) if cost_basis > 0 else Decimal(0)
-                
+
                 print_and_save(f"{symbol}: {qty:.4f} shares @ ${avg_cost:.2f} avg")
                 print_and_save(f"   Current: ${current_value:,.2f} | P&L: ${pnl:+,.2f} ({pnl_pct:+.2f}%)\n")
         else:
-            print_and_save("No positions (all cash)")
+            print_and_save("No asset positions")
         
         print_and_save(f"{'='*60}\n")
         
@@ -389,46 +415,51 @@ class Backtest:
         
         print(f"💾 Report saved to: {filepath}\n")
     
-    def run(self):
-        """Run complete backtest"""
+    def run(self, preserve_portfolio: bool = False):
+        """
+        Run complete backtest
+
+        Args:
+            preserve_portfolio: If True, continue from existing portfolio (for month-by-month training)
+        """
         print(f"\n{'='*60}")
         print(f"🚀 STARTING BACKTEST: {self.start_date} to {self.end_date}")
         print(f"{'='*60}\n")
-        
+
         # Step 1: Get trading days
         print("📅 Loading trading days...")
         self.trading_days = self.get_trading_days()
         print(f"   Found {len(self.trading_days)} trading days\n")
-        
-        # Step 2: Clear old data
-        self.clear_backtest_data()
-        
+
+        # Step 2: Clear old data (optionally preserve portfolio)
+        self.clear_backtest_data(preserve_portfolio=preserve_portfolio)
+
         # Step 3: Run backtest for each day
         print("🔄 Running daily simulations...\n")
         for i, trade_date in enumerate(self.trading_days, 1):
             print(f"Day {i}/{len(self.trading_days)}: {trade_date}")
-            
+
             # Generate signal
             print("   Generating signal...", end=" ")
             if not self.generate_signal(trade_date):
                 print("❌ FAILED")
                 continue
             print("✓")
-            
+
             # Execute trades
             print("   Executing trades...", end=" ")
             if not self.execute_trades(trade_date):
                 print("❌ FAILED")
                 continue
             print("✓")
-            
+
             # Calculate metrics
             print("   Calculating metrics...", end=" ")
-            metrics = self.calculate_daily_metrics(trade_date)
+            metrics = self.calculate_daily_metrics(trade_date, preserve_portfolio=preserve_portfolio)
             self.save_daily_metrics(metrics)
             print(f"✓ (Portfolio: ${metrics['total_value']:,.2f}, Return: {metrics['cumulative_return']:+.2f}%)")
             print()
-        
+
         # Step 4: Generate report
         self.generate_report()
 
@@ -438,18 +469,20 @@ def main():
     parser = argparse.ArgumentParser(description='Run backtest over a date range')
     parser.add_argument('--start-date', required=True, help='Start date (YYYY-MM-DD)')
     parser.add_argument('--end-date', required=True, help='End date (YYYY-MM-DD)')
-    
+    parser.add_argument('--preserve-portfolio', action='store_true',
+                        help='Preserve existing portfolio state (for month-by-month training)')
+
     args = parser.parse_args()
-    
+
     try:
         start_date = datetime.strptime(args.start_date, '%Y-%m-%d').date()
         end_date = datetime.strptime(args.end_date, '%Y-%m-%d').date()
-        
+
         if start_date > end_date:
             raise ValueError("Start date must be before end date")
-        
+
         backtest = Backtest(start_date, end_date)
-        backtest.run()
+        backtest.run(preserve_portfolio=args.preserve_portfolio)
         backtest.close()
         return 0
     except Exception as e:

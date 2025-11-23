@@ -683,14 +683,47 @@ class StrategyTuner:
             new_params.regime_bullish_threshold = max(0.2, new_params.regime_bullish_threshold - 0.05)
             print(f"  ✨ Sharpe ratio ({sharpe:.2f}) strong - can be more aggressive")
 
-        # 5. Adjust sell strategy based on bearish performance
+        # 5. Adjust sell strategy based on performance - ENHANCED
+        sell_evals = [e for e in evaluations if e.action == 'SELL']
         bearish_evals = [e for e in evaluations if e.regime == 'bearish']
+
+        # Analyze SELL action effectiveness
+        if sell_evals:
+            sell_effectiveness = sum(1 for e in sell_evals if e.score > 0) / len(sell_evals)
+            avg_sell_score = sum(e.score for e in sell_evals) / len(sell_evals)
+
+            # Check if sells avoided drawdowns
+            sells_avoided_dd = sum(1 for e in sell_evals if e.contribution_to_drawdown < 5) / len(sell_evals)
+
+            print(f"\n  📊 SELL Analysis:")
+            print(f"    Sell trades: {len(sell_evals)} ({sell_effectiveness*100:.1f}% effective)")
+            print(f"    Avg score: {avg_sell_score:+.2f}")
+            print(f"    Avoided DD: {sells_avoided_dd*100:.1f}%")
+
+            # If sells are preventing drawdowns well, keep current sell_percentage
+            if sell_effectiveness > 0.7 and sells_avoided_dd > 0.7:
+                print(f"  ✅ SELL strategy working well - maintaining sell_percentage")
+            # If sells aren't effective (scoring poorly), reduce sell frequency
+            elif avg_sell_score < -0.2:
+                new_params.sell_percentage = max(0.3, new_params.sell_percentage - 0.1)
+                print(f"  ⚠️  SELL trades underperforming - decreasing sell_percentage to be more selective")
+            # If not selling enough during bearish periods, increase
+            elif bearish_evals and len(sell_evals) < len(bearish_evals) * 0.3:
+                new_params.sell_percentage = min(0.9, new_params.sell_percentage + 0.1)
+                print(f"  🔻 Not selling enough in bearish periods - increasing sell_percentage")
+
+        # If no sells happened but we had high drawdowns, we need to sell more!
+        elif overall_metrics.get('max_drawdown', 0) > 15:
+            new_params.sell_percentage = min(0.9, new_params.sell_percentage + 0.15)
+            print(f"  ⚠️  High drawdown ({overall_metrics['max_drawdown']:.1f}%) with no SELL trades - significantly increasing sell_percentage")
+
+        # Specific bearish regime handling
         if bearish_evals:
             avg_bearish_score = sum(e.score for e in bearish_evals) / len(bearish_evals)
             if avg_bearish_score < -0.2:
-                # Sell faster in bearish conditions
+                # Poor bearish performance - need faster sells
                 new_params.sell_percentage = min(0.9, new_params.sell_percentage + 0.1)
-                print("  🔻 Poor bearish performance - increasing sell percentage")
+                print(f"  🔻 Poor bearish performance (score: {avg_bearish_score:+.2f}) - increasing sell percentage")
 
         # NEW: 6. Tune confidence-based parameters
         if confidence_analysis:
@@ -722,14 +755,8 @@ class StrategyTuner:
                 new_params.rsi_oversold_threshold = max(20.0, new_params.rsi_oversold_threshold - 5)
                 print(f"  📉 Mean reversion signals underperforming - tightening RSI threshold")
 
-        # NEW: 8. Adjust circuit breaker based on intra-month drawdowns
-        circuit_breaker_trades = [e for e in evaluations if e.signal_type == 'circuit_breaker']
-        if circuit_breaker_trades:
-            cb_effectiveness = sum(1 for t in circuit_breaker_trades if t.score > 0) / len(circuit_breaker_trades)
-            if cb_effectiveness < 0.5:
-                # Circuit breaker triggering too late or ineffectively
-                new_params.intramonth_drawdown_limit = max(0.05, new_params.intramonth_drawdown_limit - 0.02)
-                print(f"  ⚠️  Circuit breaker effectiveness low - tightening trigger")
+        # REMOVED: Circuit breaker tuning - strategy should learn from mistakes, not cease operations
+        # Just monitor drawdown and warn in monthly reports
 
         return new_params
 
@@ -890,8 +917,11 @@ class StrategyTuner:
         add(f"💡 RECOMMENDATIONS")
         add(f"{'='*80}\n")
 
-        if overall_metrics.get('max_drawdown', 0) > old_params.max_drawdown_tolerance:
-            add(f"⚠️  Max drawdown exceeded tolerance - consider reviewing position sizing")
+        max_dd = overall_metrics.get('max_drawdown', 0)
+        if max_dd > old_params.max_drawdown_tolerance:
+            add(f"⚠️  WARNING: Max drawdown ({max_dd:.1f}%) exceeded tolerance ({old_params.max_drawdown_tolerance:.0f}%)")
+            add(f"    Strategy continues operating to learn from mistakes")
+            add(f"    Tuning will adjust parameters to improve future performance")
 
         if overall_metrics.get('sharpe_ratio', 0) < old_params.min_sharpe_target:
             add(f"📊 Sharpe ratio below target - focus on risk-adjusted returns")
