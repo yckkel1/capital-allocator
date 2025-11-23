@@ -470,19 +470,28 @@ class Backtest:
 
             # Get the signal to show what action was decided
             self.cursor.execute("""
-                SELECT features_used FROM daily_signals
+                SELECT features_used, allocations FROM daily_signals
                 WHERE trade_date = %s
             """, (trade_date,))
             signal_row = self.cursor.fetchone()
             if signal_row:
                 features = signal_row['features_used']
+                allocations = signal_row['allocations']
                 action = features.get('action', 'UNKNOWN')
                 allocation_pct = features.get('allocation_pct', 0)
                 signal_type = features.get('signal_type', '')
 
                 # Make output clearer based on action type
                 if action == 'BUY':
-                    print(f"✓ (BUY ${self.daily_budget * Decimal(str(allocation_pct)):,.0f} = {allocation_pct*100:.0f}% of budget)")
+                    # FIXED: Show actual amount being deployed from allocations, not just daily_budget * pct
+                    actual_buy_amount = sum(Decimal(str(v)) for v in allocations.values() if v > 0)
+
+                    # Get current cash balance to show context
+                    self.cursor.execute("SELECT quantity FROM portfolio WHERE symbol = 'CASH'")
+                    cash_row = self.cursor.fetchone()
+                    cash_before_daily = Decimal(str(cash_row['quantity'])) - self.daily_budget if cash_row else Decimal(0)
+
+                    print(f"✓ (BUY ${actual_buy_amount:,.0f} = {allocation_pct*100:.0f}% of ${cash_before_daily + self.daily_budget:,.0f} available)")
                 elif action == 'SELL':
                     print(f"✓ (SELL {allocation_pct*100:.0f}% of each position | {signal_type})")
                 elif action == 'HOLD':
