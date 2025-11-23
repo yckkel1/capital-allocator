@@ -971,27 +971,54 @@ def generate_signal(trade_date: date = None):
             # This ensures we never exceed either the strategy allocation or half Kelly
             kelly_limited_allocation = min(base_allocation, half_kelly_pct)
             final_allocation = kelly_limited_allocation * capital_scale_factor
+
+            # CRITICAL: Prevent stalling from overly conservative allocations
+            # If final allocation is too low, it will result in tiny positions or HOLD
+            MIN_ALLOCATION_THRESHOLD = 0.05  # Minimum 5% to deploy
+
+            if final_allocation < MIN_ALLOCATION_THRESHOLD:
+                print(f"\n⚠️  WARNING: Final allocation {final_allocation*100:.1f}% below {MIN_ALLOCATION_THRESHOLD*100:.0f}% threshold")
+                print(f"   Base: {base_allocation*100:.1f}%, Half Kelly: {half_kelly_pct*100:.1f}%, Scale: {capital_scale_factor:.3f}x")
+                print(f"   Options: [1] Use minimum threshold [2] Convert to HOLD")
+
+                # Option 1: Use minimum threshold if we have confidence in the trade
+                if confidence >= 0.6:
+                    final_allocation = MIN_ALLOCATION_THRESHOLD
+                    signal_type += "_min_threshold_applied"
+                    print(f"   → Using minimum {MIN_ALLOCATION_THRESHOLD*100:.0f}% threshold (confidence {confidence:.2f} ≥ 0.6)")
+                else:
+                    # Option 2: Too risky with low confidence - convert to HOLD
+                    action = "HOLD"
+                    signal_type = "allocation_too_low_with_low_confidence"
+                    final_allocation = 0.0
+                    print(f"   → Converting to HOLD (low confidence {confidence:.2f})")
+
             final_allocation_pct = final_allocation  # Store for metadata
 
-            # Deploy capital with scaled allocation
-            buy_amount = available_cash * final_allocation
-            allocations = allocate_diversified(asset_scores, buy_amount)
+            # Only proceed with BUY if not converted to HOLD
+            if action == "BUY" and final_allocation > 0:
+                # Deploy capital with scaled allocation
+                buy_amount = available_cash * final_allocation
+                allocations = allocate_diversified(asset_scores, buy_amount)
 
-            print(f"\nBuy Allocations:")
-            print(f"  Available Cash: ${available_cash:,.2f} (accumulated: ${cash_balance:,.2f} + daily: ${trading_config.daily_capital:,.2f})")
-            print(f"  Base Strategy Allocation: {base_allocation*100:.1f}%")
-            print(f"  Half Kelly Limit: {half_kelly_pct*100:.1f}%")
-            print(f"  Kelly-Limited Allocation: {kelly_limited_allocation*100:.1f}%")
-            print(f"  Capital Scale Factor: {capital_scale_factor:.3f} (capital: ${available_cash:,.0f})")
-            print(f"  → Final Allocation: {final_allocation*100:.1f}% = ${buy_amount:,.2f}")
+                print(f"\nBuy Allocations:")
+                print(f"  Available Cash: ${available_cash:,.2f} (accumulated: ${cash_balance:,.2f} + daily: ${trading_config.daily_capital:,.2f})")
+                print(f"  Base Strategy Allocation: {base_allocation*100:.1f}%")
+                print(f"  Half Kelly Limit: {half_kelly_pct*100:.1f}%")
+                print(f"  Kelly-Limited Allocation: {kelly_limited_allocation*100:.1f}%")
+                print(f"  Capital Scale Factor: {capital_scale_factor:.3f} (capital: ${available_cash:,.0f})")
+                print(f"  → Final Allocation: {final_allocation*100:.1f}% = ${buy_amount:,.2f}")
 
-            for symbol, amount in sorted(allocations.items(), key=lambda x: x[1], reverse=True):
-                if amount > 0:
-                    print(f"    {symbol}: ${amount:,.2f} ({amount/buy_amount*100:.1f}%)")
+                for symbol, amount in sorted(allocations.items(), key=lambda x: x[1], reverse=True):
+                    if amount > 0:
+                        print(f"    {symbol}: ${amount:,.2f} ({amount/buy_amount*100:.1f}%)")
 
-            cash_kept = available_cash - buy_amount
-            if cash_kept > 0:
-                print(f"  Cash Reserve: ${cash_kept:,.2f}")
+                cash_kept = available_cash - buy_amount
+                if cash_kept > 0:
+                    print(f"  Cash Reserve: ${cash_kept:,.2f}")
+            elif action == "HOLD":
+                # Converted to HOLD due to low allocation
+                allocations = {s: 0.0 for s in trading_config.assets}
 
         elif action == "SELL":
             if has_holdings:

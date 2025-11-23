@@ -501,22 +501,25 @@ class Backtest:
                     display_parts = [f"BUY ${actual_buy_amount:,.0f}"]
 
                     # Show allocation breakdown if capital scaling was applied
-                    if capital_scale_factor < 1.0:
-                        display_parts.append(f"base:{allocation_pct*100:.0f}%")
+                    if capital_scale_factor < 1.0 or half_kelly_pct > 0:
+                        display_parts.append(f"base:{allocation_pct*100:.1f}%")
                         if half_kelly_pct > 0:
-                            display_parts.append(f"kelly:{half_kelly_pct*100:.0f}%")
-                        display_parts.append(f"scale:{capital_scale_factor:.2f}x")
-                        display_parts.append(f"→{final_allocation_pct*100:.0f}%")
+                            display_parts.append(f"kelly:{half_kelly_pct*100:.1f}%")
+                        display_parts.append(f"scale:{capital_scale_factor:.3f}x")
+                        display_parts.append(f"→{final_allocation_pct*100:.1f}%")
                     else:
-                        display_parts.append(f"{final_allocation_pct*100:.0f}%")
+                        display_parts.append(f"{final_allocation_pct*100:.1f}%")
 
                     display_parts.append(f"of ${available_cash:,.0f}")
 
                     print(f"✓ ({' '.join(display_parts)})")
                 elif action == 'SELL':
-                    print(f"✓ (SELL {allocation_pct*100:.0f}% of each position | {signal_type})")
+                    print(f"✓ (SELL {allocation_pct*100:.1f}% of each position | {signal_type})")
                 elif action == 'HOLD':
-                    print(f"✓ (HOLD | {signal_type})")
+                    # Enhanced HOLD display to help diagnose stalling
+                    regime = features.get('regime', 0)
+                    risk = features.get('risk', 0)
+                    print(f"✓ (HOLD | {signal_type} | regime:{regime:.2f} risk:{risk:.0f})")
                 else:
                     print(f"✓ ({action})")
             else:
