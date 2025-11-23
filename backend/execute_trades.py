@@ -133,16 +133,16 @@ class TradeExecutor:
         """Calculate P&L for current positions"""
         total_cost = Decimal(0)
         total_value = Decimal(0)
-        
+
         for symbol, pos in positions.items():
-            cost = pos['total_cost']
+            cost = pos['quantity'] * pos['avg_cost']
             value = pos['quantity'] * current_prices.get(symbol, Decimal(0))
             total_cost += cost
             total_value += value
-        
+
         pnl = total_value - total_cost
         pnl_pct = (pnl / total_cost * 100) if total_cost > 0 else Decimal(0)
-        
+
         return {
             'total_cost': total_cost,
             'total_value': total_value,
@@ -388,7 +388,8 @@ class TradeExecutor:
             print(f"   Positions:")
             for symbol, pos in positions.items():
                 current_value = pos['quantity'] * current_prices.get(symbol, Decimal(0))
-                position_pnl = current_value - pos['total_cost']
+                cost = pos['quantity'] * pos['avg_cost']
+                position_pnl = current_value - cost
                 print(f"      {symbol}: {pos['quantity']:.4f} shares @ ${pos['avg_cost']:.2f} avg | "
                       f"Current: ${current_value:,.2f} | P&L: ${position_pnl:,.2f}")
         else:
