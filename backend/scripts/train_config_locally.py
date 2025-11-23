@@ -190,14 +190,20 @@ def run_continuous_backtest_with_tuning():
             print("ERROR: No price history data found!")
             sys.exit(1)
 
-        start_date, end_date, total_days = result
+        oldest_date, newest_date, total_days = result
+
+        # Start trading 365 days after min(date) to have enough historical data
+        # (generate_signal needs lookback_days + 30 = 282 days before trade_date)
+        start_date = oldest_date + timedelta(days=365)
+        end_date = newest_date
 
         print("=" * 60)
         print("CONTINUOUS BACKTEST WITH MONTHLY TUNING")
         print("=" * 60)
         print()
-        print(f"Price History Range: {start_date} to {end_date}")
-        print(f"Total Trading Days: {total_days}")
+        print(f"Price History Range: {oldest_date} to {newest_date}")
+        print(f"Trading Period: {start_date} to {end_date}")
+        print(f"  (Starting 365 days after min(date) to have enough historical data)")
         print()
 
         # Create initial config
