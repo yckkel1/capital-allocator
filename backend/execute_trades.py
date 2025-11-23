@@ -61,30 +61,72 @@ class TradeExecutor:
         
         return Decimal(str(result['open_price']))
 
+    def ensure_cash_exists(self):
+        """Ensure CASH entry exists in portfolio table"""
+        self.cursor.execute("""
+            SELECT quantity FROM portfolio WHERE symbol = 'CASH'
+        """)
+        result = self.cursor.fetchone()
+
+        if not result:
+            # Initialize CASH with 0
+            self.cursor.execute("""
+                INSERT INTO portfolio (symbol, quantity, avg_cost, last_updated)
+                VALUES ('CASH', 0, 1.0, %s)
+            """, (datetime.now(timezone.utc),))
+            self.conn.commit()
+
+    def get_cash_balance(self) -> Decimal:
+        """Get current CASH balance from portfolio"""
+        self.ensure_cash_exists()
+        self.cursor.execute("""
+            SELECT quantity FROM portfolio WHERE symbol = 'CASH'
+        """)
+        result = self.cursor.fetchone()
+        return Decimal(str(result['quantity'])) if result else Decimal(0)
+
+    def add_cash(self, amount: Decimal, description: str = ""):
+        """Add cash to portfolio (from daily capital or sells)"""
+        self.ensure_cash_exists()
+        self.cursor.execute("""
+            UPDATE portfolio
+            SET quantity = quantity + %s, last_updated = %s
+            WHERE symbol = 'CASH'
+        """, (amount, datetime.now(timezone.utc)))
+        self.conn.commit()
+
+    def deduct_cash(self, amount: Decimal, description: str = ""):
+        """Deduct cash from portfolio (for buys)"""
+        self.ensure_cash_exists()
+        cash_balance = self.get_cash_balance()
+        if cash_balance < amount:
+            raise ValueError(f"Insufficient cash: have ${cash_balance:.2f}, need ${amount:.2f}")
+
+        self.cursor.execute("""
+            UPDATE portfolio
+            SET quantity = quantity - %s, last_updated = %s
+            WHERE symbol = 'CASH'
+        """, (amount, datetime.now(timezone.utc)))
+        self.conn.commit()
+
     def get_current_positions(self) -> Dict[str, Dict]:
         """
-        Get current cumulative positions
-        Returns: {symbol: {'quantity': Decimal, 'avg_cost': Decimal, 'total_cost': Decimal}}
+        Get current positions from portfolio table (excluding CASH)
+        Returns: {symbol: {'quantity': Decimal, 'avg_cost': Decimal}}
         """
         self.cursor.execute("""
-            SELECT 
-                symbol,
-                SUM(quantity) as total_quantity,
-                SUM(quantity * price) / NULLIF(SUM(quantity), 0) as avg_cost,
-                SUM(quantity * price) as total_cost
-            FROM trades
-            GROUP BY symbol
-            HAVING SUM(quantity) > 0.0001
+            SELECT symbol, quantity, avg_cost
+            FROM portfolio
+            WHERE symbol != 'CASH' AND quantity > 0.0001
         """)
-        
+
         positions = {}
         for row in self.cursor.fetchall():
             positions[row['symbol']] = {
-                'quantity': Decimal(str(row['total_quantity'])),
-                'avg_cost': Decimal(str(row['avg_cost'])) if row['avg_cost'] else Decimal(0),
-                'total_cost': Decimal(str(row['total_cost']))
+                'quantity': Decimal(str(row['quantity'])),
+                'avg_cost': Decimal(str(row['avg_cost']))
             }
-        
+
         return positions
 
     def calculate_portfolio_pnl(self, positions: Dict, current_prices: Dict[str, Decimal]) -> Dict:
@@ -112,21 +154,27 @@ class TradeExecutor:
         """
         Execute buy trades based on signal allocations
         Uses opening price of execution_date
+        Deducts cash from portfolio for each purchase
         """
         trades = []
         target_allocations = signal['allocations']  # Dollar amounts
-        
+
         for symbol, dollar_amount in target_allocations.items():
             if dollar_amount <= 0:
                 continue
-            
+
             # Get opening price for execution
             opening_price = self.get_opening_price(symbol, execution_date)
-            
+
             # Calculate shares to buy
             quantity = (Decimal(str(dollar_amount)) / opening_price).quantize(Decimal('0.0001'))
-            
+
             if quantity > 0:
+                total_cost = quantity * opening_price
+
+                # Deduct cash from portfolio BEFORE buying
+                self.deduct_cash(total_cost, f"BUY {quantity:.4f} {symbol} @ ${opening_price:.2f}")
+
                 # Record trade
                 self.cursor.execute("""
                     INSERT INTO trades (signal_id, trade_date, executed_at, symbol, action, quantity, price, amount)
@@ -139,17 +187,17 @@ class TradeExecutor:
                     'BUY',
                     quantity,
                     opening_price,
-                    quantity * opening_price
+                    total_cost
                 ))
-                
+
                 trades.append({
                     'symbol': symbol,
                     'quantity': quantity,
                     'price': opening_price,
                     'side': 'BUY',
-                    'total': quantity * opening_price
+                    'total': total_cost
                 })
-        
+
         self.conn.commit()
         return trades
 
@@ -252,6 +300,11 @@ class TradeExecutor:
             sell_quantity = (pos['quantity'] * Decimal(str(allocation_pct))).quantize(Decimal('0.0001'))
 
             if sell_quantity > 0:
+                total_proceeds = sell_quantity * opening_price
+
+                # Add cash to portfolio from sale proceeds
+                self.add_cash(total_proceeds, f"SELL {sell_quantity:.4f} {symbol} @ ${opening_price:.2f}")
+
                 # Record trade (negative quantity for sell)
                 self.cursor.execute("""
                     INSERT INTO trades (signal_id, trade_date, executed_at, symbol, action, quantity, price, amount)
@@ -264,7 +317,7 @@ class TradeExecutor:
                     'SELL',
                     -sell_quantity,
                     opening_price,
-                    sell_quantity * opening_price
+                    total_proceeds
                 ))
 
                 trades.append({
@@ -272,7 +325,7 @@ class TradeExecutor:
                     'quantity': sell_quantity,
                     'price': opening_price,
                     'side': 'SELL',
-                    'total': sell_quantity * opening_price
+                    'total': total_proceeds
                 })
 
         self.conn.commit()
@@ -299,6 +352,9 @@ class TradeExecutor:
         print(f"Execution Date: {execution_date}")
         print(f"Daily Budget: ${DAILY_BUDGET:,.2f} (from config ID: {trading_config.id})")
         print(f"{'='*60}\n")
+
+        # Inject daily capital as CASH into portfolio
+        self.add_cash(DAILY_BUDGET, f"Daily capital injection for {execution_date}")
 
         # 1. Get latest signal
         signal = self.get_latest_signal()
