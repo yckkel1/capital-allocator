@@ -247,6 +247,7 @@ def run_continuous_backtest_with_tuning():
             print(f"[{i}/{len(months_to_process)}] Processing {year}-{month:02d} ({month_start_actual} to {month_end_actual})")
 
             # Run backtest for this month
+            print(f"  Running backtest...")
             backtest_cmd = [
                 sys.executable,
                 "backtest.py",
@@ -260,14 +261,11 @@ def run_continuous_backtest_with_tuning():
 
             result = subprocess.run(
                 backtest_cmd,
-                cwd=str(Path(__file__).parent.parent),
-                capture_output=True,
-                text=True
+                cwd=str(Path(__file__).parent.parent)
             )
 
             if result.returncode != 0:
                 print(f"  ❌ Backtest failed!")
-                print(result.stderr)
                 sys.exit(1)
 
             # Check how much data was generated
