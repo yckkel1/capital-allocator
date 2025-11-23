@@ -413,34 +413,42 @@ class TradeExecutor:
         if action == 'BUY':
             print(f"🔄 Executing BUY orders (Budget: ${DAILY_BUDGET * Decimal(str(allocation_pct)):,.2f}):\n")
             trades = self.execute_buy_trades(signal, signal['id'], execution_date)
-            
+
             if trades:
                 # Update portfolio table
                 self.update_portfolio(trades)
-                
+
                 total_spent = sum(t['total'] for t in trades)
                 for trade in trades:
                     print(f"   ✅ BUY {trade['quantity']:.4f} {trade['symbol']} @ ${trade['price']:.2f} = ${trade['total']:,.2f}")
                 print(f"\n   Total Spent: ${total_spent:,.2f}")
                 print(f"   Cash Held: ${DAILY_BUDGET * Decimal(str(allocation_pct)) - total_spent:,.2f}")
+
+                # Show final cash balance
+                final_cash = self.get_cash_balance()
+                print(f"   💵 Total Cash Balance: ${final_cash:,.2f}")
             else:
                 print("   No buy orders executed")
-                
+
         elif action == 'SELL':
             print(f"🔄 Executing SELL orders:\n")
             trades = self.execute_sell_trades(signal, signal['id'], execution_date)
-            
+
             if trades:
                 # Update portfolio table
                 self.update_portfolio(trades)
-                
+
                 total_proceeds = sum(t['total'] for t in trades)
                 for trade in trades:
                     print(f"   ✅ SELL {trade['quantity']:.4f} {trade['symbol']} @ ${trade['price']:.2f} = ${trade['total']:,.2f}")
                 print(f"\n   Total Proceeds: ${total_proceeds:,.2f}")
+
+                # Show final cash balance
+                final_cash = self.get_cash_balance()
+                print(f"   💵 Total Cash Balance: ${final_cash:,.2f}")
             else:
                 print("   No sell orders executed")
-                
+
         else:  # HOLD
             print(f"✋ Action: HOLD - No trades executed today")
 
@@ -450,7 +458,11 @@ class TradeExecutor:
                 VALUES (%s, %s, %s, 'CASH', 'HOLD', 0, 0, 0)
             """, (signal['id'], execution_date, datetime.now(timezone.utc)))
             self.conn.commit()
-        
+
+            # Show cash balance for HOLD days too
+            final_cash = self.get_cash_balance()
+            print(f"   💵 Total Cash Balance: ${final_cash:,.2f}")
+
         print(f"{'='*60}\n")
 
 
