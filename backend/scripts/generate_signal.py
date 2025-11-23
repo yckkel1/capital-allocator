@@ -481,39 +481,26 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
 
     # REMOVED: Circuit breaker logic - strategy must continue operating to learn
 
-    # NEW: Prevent over-selling if already heavily in cash
-    # If >70% in cash, we've already de-risked significantly
-    if cash_pct > 70 and has_holdings:
-        # Already heavily de-risked, don't keep hammering sells unless truly catastrophic
-        if risk_score > 85:  # Only extreme risk warrants more selling
-            sell_pct = trading_config.sell_percentage * 0.3  # Sell just 30% of normal
-            return ("SELL", sell_pct, "extreme_risk_already_defensive")
-        else:
-            return ("HOLD", 0.0, "already_defensive_hold")
-
     # NEW: Detect downward pressure early to avoid being caught in market crashes
     has_pressure, pressure_severity, pressure_reason = detect_downward_pressure(features_by_asset, risk_score)
 
     if has_pressure and has_holdings:
         if pressure_severity == "severe":
-            # Severe downward pressure - sell aggressively, but scale down if already in cash
-            base_sell = min(0.9, trading_config.sell_percentage * 1.2)
-            # Reduce sell amount if already partially defensive (30-70% cash)
-            if cash_pct > 30:
-                cash_adjustment = 1.0 - ((cash_pct - 30) / 100)  # Reduce linearly from 30-70%
-                sell_pct = base_sell * max(0.3, cash_adjustment)
+            # Severe downward pressure - sell aggressively
+            # Scale down if already heavily defensive (>70% cash) to avoid over-selling
+            if cash_pct > 70:
+                sell_pct = min(0.5, trading_config.sell_percentage * 0.5)  # Sell less if already defensive
             else:
-                sell_pct = base_sell
+                sell_pct = min(0.9, trading_config.sell_percentage * 1.2)
             return ("SELL", sell_pct, f"downward_pressure_severe")
         elif pressure_severity == "moderate" and regime_score < 0.1:
-            # Moderate pressure in non-bullish regime - reduce exposure
-            base_sell = trading_config.sell_percentage * 0.6
-            # Scale down if already partially defensive
-            if cash_pct > 40:
-                sell_pct = base_sell * 0.5
+            # Moderate pressure in non-bullish regime - reduce exposure unless already very defensive
+            if cash_pct > 70:
+                # Already defensive, let normal logic handle it
+                pass
             else:
-                sell_pct = base_sell
-            return ("SELL", sell_pct, "downward_pressure_moderate")
+                sell_pct = trading_config.sell_percentage * 0.6
+                return ("SELL", sell_pct, "downward_pressure_moderate")
 
     # IMPROVED: Sell aggressively when risk is VERY HIGH (>70), regardless of regime
     # Lowered from 85 to 70 to be more responsive to risk
