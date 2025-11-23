@@ -241,7 +241,7 @@ def run_continuous_backtest_with_tuning():
                 SELECT MIN(date), MAX(date)
                 FROM price_history
                 WHERE date >= %s AND date < %s
-            """, (month_start, min(next_month_start, end_date + timedelta(days=1))))
+            """, (month_start, min(next_month_start, trading_end + timedelta(days=1))))
 
             result = cursor.fetchone()
             if not result or not result[0]:
