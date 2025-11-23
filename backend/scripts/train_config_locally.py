@@ -61,7 +61,7 @@ def create_initial_config(start_date: date):
                 30.0, 70.0,
                 2.0, 0.5,
                 0.2, 0.01,
-                0.01,                # Very low confidence threshold (1%) - let trades through, tuning will optimize
+                0.01,               
                 0.2,
                 0.15, 0.5,
                 'initial_training', 'Initial aggressive config for training'
