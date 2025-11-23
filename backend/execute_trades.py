@@ -37,15 +37,28 @@ class TradeExecutor:
     def get_latest_signal(self) -> Dict:
         """Fetch the most recent trading signal"""
         self.cursor.execute("""
-            SELECT * FROM daily_signals 
-            ORDER BY trade_date DESC 
+            SELECT * FROM daily_signals
+            ORDER BY trade_date DESC
             LIMIT 1
         """)
         signal = self.cursor.fetchone()
-        
+
         if not signal:
             raise Exception("No signals found in database")
-        
+
+        return dict(signal)
+
+    def get_signal_for_date(self, trade_date: str) -> Dict:
+        """Fetch trading signal for a specific date"""
+        self.cursor.execute("""
+            SELECT * FROM daily_signals
+            WHERE trade_date = %s
+        """, (trade_date,))
+        signal = self.cursor.fetchone()
+
+        if not signal:
+            raise Exception(f"No signal found for {trade_date}")
+
         return dict(signal)
 
     def get_opening_price(self, symbol: str, date: str) -> Decimal:
@@ -133,16 +146,16 @@ class TradeExecutor:
         """Calculate P&L for current positions"""
         total_cost = Decimal(0)
         total_value = Decimal(0)
-        
+
         for symbol, pos in positions.items():
-            cost = pos['total_cost']
+            cost = pos['quantity'] * pos['avg_cost']
             value = pos['quantity'] * current_prices.get(symbol, Decimal(0))
             total_cost += cost
             total_value += value
-        
+
         pnl = total_value - total_cost
         pnl_pct = (pnl / total_cost * 100) if total_cost > 0 else Decimal(0)
-        
+
         return {
             'total_cost': total_cost,
             'total_value': total_value,
@@ -356,12 +369,12 @@ class TradeExecutor:
         # Inject daily capital as CASH into portfolio
         self.add_cash(DAILY_BUDGET, f"Daily capital injection for {execution_date}")
 
-        # 1. Get latest signal
-        signal = self.get_latest_signal()
+        # 1. Get signal for execution date
+        signal = self.get_signal_for_date(execution_date)
         action = signal['features_used']['action']
         allocation_pct = signal['features_used']['allocation_pct']
 
-        print(f"📊 Latest Signal (ID: {signal['id']}):")
+        print(f"📊 Signal for {execution_date} (ID: {signal['id']}):")
         print(f"   Signal Date: {signal['trade_date']}")
         print(f"   Action: {action}")
         print(f"   Budget Allocation: ${DAILY_BUDGET * Decimal(str(allocation_pct)):,.2f} ({allocation_pct * 100}%)")
@@ -388,7 +401,8 @@ class TradeExecutor:
             print(f"   Positions:")
             for symbol, pos in positions.items():
                 current_value = pos['quantity'] * current_prices.get(symbol, Decimal(0))
-                position_pnl = current_value - pos['total_cost']
+                cost = pos['quantity'] * pos['avg_cost']
+                position_pnl = current_value - cost
                 print(f"      {symbol}: {pos['quantity']:.4f} shares @ ${pos['avg_cost']:.2f} avg | "
                       f"Current: ${current_value:,.2f} | P&L: ${position_pnl:,.2f}")
         else:
@@ -429,6 +443,13 @@ class TradeExecutor:
                 
         else:  # HOLD
             print(f"✋ Action: HOLD - No trades executed today")
+
+            # Record HOLD action for tracking
+            self.cursor.execute("""
+                INSERT INTO trades (signal_id, trade_date, action, symbol, quantity, price, total_cost, created_at)
+                VALUES (%s, %s, 'HOLD', 'CASH', 0, 0, 0, %s)
+            """, (signal['id'], execution_date, datetime.now(timezone.utc)))
+            self.conn.commit()
         
         print(f"{'='*60}\n")
 
