@@ -465,11 +465,14 @@ def detect_downward_pressure(features_by_asset: dict, risk_score: float) -> tupl
 def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
                   mean_reversion_opportunity: tuple, adaptive_bullish_threshold: float,
                   adaptive_bearish_threshold: float, current_drawdown: float,
-                  features_by_asset: dict) -> tuple:
+                  features_by_asset: dict, cash_pct: float = 0.0) -> tuple:
     """
     Decide whether to BUY, SELL, or HOLD with enhanced logic
 
     Note: Removed circuit breaker - strategy should learn from mistakes, not cease operations
+
+    Args:
+        cash_pct: Current percentage of portfolio in cash (0-100)
 
     Returns:
         tuple: (action: str, allocation_pct: float, signal_type: str)
@@ -478,17 +481,38 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
 
     # REMOVED: Circuit breaker logic - strategy must continue operating to learn
 
+    # NEW: Prevent over-selling if already heavily in cash
+    # If >70% in cash, we've already de-risked significantly
+    if cash_pct > 70 and has_holdings:
+        # Already heavily de-risked, don't keep hammering sells unless truly catastrophic
+        if risk_score > 85:  # Only extreme risk warrants more selling
+            sell_pct = trading_config.sell_percentage * 0.3  # Sell just 30% of normal
+            return ("SELL", sell_pct, "extreme_risk_already_defensive")
+        else:
+            return ("HOLD", 0.0, "already_defensive_hold")
+
     # NEW: Detect downward pressure early to avoid being caught in market crashes
     has_pressure, pressure_severity, pressure_reason = detect_downward_pressure(features_by_asset, risk_score)
 
     if has_pressure and has_holdings:
         if pressure_severity == "severe":
-            # Severe downward pressure - sell aggressively regardless of regime
-            sell_pct = min(0.9, trading_config.sell_percentage * 1.2)  # Sell more than usual
+            # Severe downward pressure - sell aggressively, but scale down if already in cash
+            base_sell = min(0.9, trading_config.sell_percentage * 1.2)
+            # Reduce sell amount if already partially defensive (30-70% cash)
+            if cash_pct > 30:
+                cash_adjustment = 1.0 - ((cash_pct - 30) / 100)  # Reduce linearly from 30-70%
+                sell_pct = base_sell * max(0.3, cash_adjustment)
+            else:
+                sell_pct = base_sell
             return ("SELL", sell_pct, f"downward_pressure_severe")
         elif pressure_severity == "moderate" and regime_score < 0.1:
             # Moderate pressure in non-bullish regime - reduce exposure
-            sell_pct = trading_config.sell_percentage * 0.6
+            base_sell = trading_config.sell_percentage * 0.6
+            # Scale down if already partially defensive
+            if cash_pct > 40:
+                sell_pct = base_sell * 0.5
+            else:
+                sell_pct = base_sell
             return ("SELL", sell_pct, "downward_pressure_moderate")
 
     # IMPROVED: Sell aggressively when risk is VERY HIGH (>70), regardless of regime
@@ -744,17 +768,37 @@ def generate_signal(trade_date: date = None):
             print(f"\n⚠️  Downward Pressure Detected: {pressure_severity.upper()}")
             print(f"   Reason: {pressure_reason}")
 
-        # Step 8: Check current holdings
+        # Step 8: Check current holdings and portfolio allocation
         holdings = db.query(Portfolio).filter(Portfolio.quantity > 0).all()
         has_holdings = len(holdings) > 0
-        print(f"\nCurrent Holdings: {len(holdings)} positions")
 
-        # Step 9: Decide action with enhanced logic
+        # Calculate current allocation: what % is in positions vs cash
+        cash_row = db.query(Portfolio).filter(Portfolio.symbol == 'CASH').first()
+        cash_balance = float(cash_row.quantity) if cash_row else 0.0
+
+        # Get latest prices to value holdings
+        holdings_value = 0.0
+        for holding in holdings:
+            latest_price = db.query(PriceHistory).filter(
+                PriceHistory.symbol == holding.symbol,
+                PriceHistory.date < trade_date
+            ).order_by(PriceHistory.date.desc()).first()
+            if latest_price:
+                holdings_value += float(holding.quantity) * float(latest_price.close_price)
+
+        total_portfolio = cash_balance + holdings_value
+        cash_pct = (cash_balance / total_portfolio * 100) if total_portfolio > 0 else 0
+        holdings_pct = (holdings_value / total_portfolio * 100) if total_portfolio > 0 else 0
+
+        print(f"\nCurrent Holdings: {len(holdings)} positions")
+        print(f"Portfolio Allocation: {holdings_pct:.1f}% positions, {cash_pct:.1f}% cash (${cash_balance:,.0f})")
+
+        # Step 9: Decide action with enhanced logic (now aware of current allocation)
         action, allocation_pct, signal_type = decide_action(
             regime_score, risk_score, has_holdings,
             mean_reversion_opportunity,
             adaptive_bullish_threshold, adaptive_bearish_threshold,
-            current_dd, features_by_asset
+            current_dd, features_by_asset, cash_pct
         )
         print(f"\nDecision: {action} (allocation: {allocation_pct*100:.0f}%, type: {signal_type})")
 

@@ -478,7 +478,17 @@ class Backtest:
                 features = signal_row['features_used']
                 action = features.get('action', 'UNKNOWN')
                 allocation_pct = features.get('allocation_pct', 0)
-                print(f"✓ ({action}, {allocation_pct*100:.0f}% allocation)")
+                signal_type = features.get('signal_type', '')
+
+                # Make output clearer based on action type
+                if action == 'BUY':
+                    print(f"✓ (BUY ${self.daily_budget * Decimal(str(allocation_pct)):,.0f} = {allocation_pct*100:.0f}% of budget)")
+                elif action == 'SELL':
+                    print(f"✓ (SELL {allocation_pct*100:.0f}% of each position | {signal_type})")
+                elif action == 'HOLD':
+                    print(f"✓ (HOLD | {signal_type})")
+                else:
+                    print(f"✓ ({action})")
             else:
                 print("✓")
 
