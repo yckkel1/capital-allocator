@@ -172,11 +172,6 @@ class TradeExecutor:
         trades = []
         target_allocations = signal['allocations']  # Dollar amounts
 
-        # Show what we're planning to buy
-        total_planned = sum(amt for amt in target_allocations.values() if amt > 0)
-        if total_planned > 0:
-            print(f"   Buying with ${total_planned:,.2f}:")
-
         for symbol, dollar_amount in target_allocations.items():
             if dollar_amount <= 0:
                 continue
@@ -207,9 +202,6 @@ class TradeExecutor:
                     opening_price,
                     total_cost
                 ))
-
-                # Show detailed output
-                print(f"      {symbol}: Buy {quantity:.4f} shares @ ${opening_price:.2f} = ${total_cost:,.2f}")
 
                 trades.append({
                     'symbol': symbol,
@@ -297,8 +289,7 @@ class TradeExecutor:
         allocation_pct = features_used.get('allocation_pct', 0.0)
         signal_type = features_used.get('signal_type', 'unknown')
 
-        print(f"   Signal type: {signal_type}")
-        print(f"   Selling {allocation_pct*100:.0f}% of each position:")
+        print(f"   Signal type: {signal_type}, Sell percentage: {allocation_pct*100:.0f}%")
 
         # Get asset scores for ranking which to sell first
         assets = features_used.get('assets', {})
@@ -320,8 +311,6 @@ class TradeExecutor:
 
             # Sell based on allocation_pct from signal
             sell_quantity = (pos['quantity'] * Decimal(str(allocation_pct))).quantize(Decimal('0.0001'))
-            held_quantity = pos['quantity']
-            remaining_quantity = held_quantity - sell_quantity
 
             if sell_quantity > 0:
                 total_proceeds = sell_quantity * opening_price
@@ -343,10 +332,6 @@ class TradeExecutor:
                     opening_price,
                     total_proceeds
                 ))
-
-                # Show detailed output
-                print(f"      {symbol}: Sell {sell_quantity:.4f} shares @ ${opening_price:.2f} = ${total_proceeds:,.2f}")
-                print(f"         Had {held_quantity:.4f}, keeping {remaining_quantity:.4f} ({(remaining_quantity/held_quantity*100):.1f}% remaining)")
 
                 trades.append({
                     'symbol': symbol,
@@ -428,30 +413,34 @@ class TradeExecutor:
         if action == 'BUY':
             print(f"🔄 Executing BUY orders (Budget: ${DAILY_BUDGET * Decimal(str(allocation_pct)):,.2f}):\n")
             trades = self.execute_buy_trades(signal, signal['id'], execution_date)
-
+            
             if trades:
                 # Update portfolio table
                 self.update_portfolio(trades)
-
+                
                 total_spent = sum(t['total'] for t in trades)
-                print(f"\n   ✅ Total Spent: ${total_spent:,.2f}")
-                print(f"   💰 Remaining from today's budget: ${DAILY_BUDGET * Decimal(str(allocation_pct)) - total_spent:,.2f}")
+                for trade in trades:
+                    print(f"   ✅ BUY {trade['quantity']:.4f} {trade['symbol']} @ ${trade['price']:.2f} = ${trade['total']:,.2f}")
+                print(f"\n   Total Spent: ${total_spent:,.2f}")
+                print(f"   Cash Held: ${DAILY_BUDGET * Decimal(str(allocation_pct)) - total_spent:,.2f}")
             else:
                 print("   No buy orders executed")
-
+                
         elif action == 'SELL':
             print(f"🔄 Executing SELL orders:\n")
             trades = self.execute_sell_trades(signal, signal['id'], execution_date)
-
+            
             if trades:
                 # Update portfolio table
                 self.update_portfolio(trades)
-
+                
                 total_proceeds = sum(t['total'] for t in trades)
-                print(f"\n   ✅ Total Proceeds from sales: ${total_proceeds:,.2f}")
+                for trade in trades:
+                    print(f"   ✅ SELL {trade['quantity']:.4f} {trade['symbol']} @ ${trade['price']:.2f} = ${trade['total']:,.2f}")
+                print(f"\n   Total Proceeds: ${total_proceeds:,.2f}")
             else:
                 print("   No sell orders executed")
-
+                
         else:  # HOLD
             print(f"✋ Action: HOLD - No trades executed today")
 
@@ -461,10 +450,7 @@ class TradeExecutor:
                 VALUES (%s, %s, %s, 'CASH', 'HOLD', 0, 0, 0)
             """, (signal['id'], execution_date, datetime.now(timezone.utc)))
             self.conn.commit()
-
-        # Show final cash balance after all trades
-        final_cash = self.get_cash_balance()
-        print(f"   💵 Cash Balance: ${final_cash:,.2f}")
+        
         print(f"{'='*60}\n")
 
 
