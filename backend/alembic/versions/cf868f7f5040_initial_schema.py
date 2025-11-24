@@ -239,6 +239,67 @@ def upgrade() -> None:
         # Trend Consistency
         sa.Column('trend_aligned_multiplier', sa.Float(), nullable=False),
         sa.Column('trend_mixed_multiplier', sa.Float(), nullable=False),
+        # Regime Calculation Weights
+        sa.Column('regime_momentum_weight', sa.Float(), nullable=False),
+        sa.Column('regime_sma20_weight', sa.Float(), nullable=False),
+        sa.Column('regime_sma50_weight', sa.Float(), nullable=False),
+        # Adaptive Threshold Clamps
+        sa.Column('adaptive_threshold_clamp_min', sa.Float(), nullable=False),
+        sa.Column('adaptive_threshold_clamp_max', sa.Float(), nullable=False),
+        # Risk Label Thresholds
+        sa.Column('risk_label_high_threshold', sa.Float(), nullable=False),
+        sa.Column('risk_label_medium_threshold', sa.Float(), nullable=False),
+        # Strategy Tuning Parameters
+        # Market Condition Detection
+        sa.Column('market_condition_r_squared_threshold', sa.Float(), nullable=False),
+        sa.Column('market_condition_slope_threshold', sa.Float(), nullable=False),
+        sa.Column('market_condition_choppy_r_squared', sa.Float(), nullable=False),
+        sa.Column('market_condition_choppy_volatility', sa.Float(), nullable=False),
+        # Trade Evaluation Scoring
+        sa.Column('score_profitable_bonus', sa.Float(), nullable=False),
+        sa.Column('score_sharpe_bonus', sa.Float(), nullable=False),
+        sa.Column('score_low_dd_bonus', sa.Float(), nullable=False),
+        sa.Column('score_all_horizons_bonus', sa.Float(), nullable=False),
+        sa.Column('score_two_horizons_bonus', sa.Float(), nullable=False),
+        sa.Column('score_unprofitable_penalty', sa.Float(), nullable=False),
+        sa.Column('score_high_dd_penalty', sa.Float(), nullable=False),
+        sa.Column('score_sharpe_penalty', sa.Float(), nullable=False),
+        sa.Column('score_momentum_bonus', sa.Float(), nullable=False),
+        sa.Column('score_choppy_penalty', sa.Float(), nullable=False),
+        sa.Column('score_confidence_bonus', sa.Float(), nullable=False),
+        sa.Column('score_mean_reversion_bonus', sa.Float(), nullable=False),
+        # Tuning Decision Thresholds
+        sa.Column('tune_aggressive_win_rate', sa.Float(), nullable=False),
+        sa.Column('tune_aggressive_participation', sa.Float(), nullable=False),
+        sa.Column('tune_aggressive_score', sa.Float(), nullable=False),
+        sa.Column('tune_conservative_win_rate', sa.Float(), nullable=False),
+        sa.Column('tune_conservative_dd', sa.Float(), nullable=False),
+        sa.Column('tune_conservative_score', sa.Float(), nullable=False),
+        # Parameter Adjustment Amounts
+        sa.Column('tune_allocation_step', sa.Float(), nullable=False),
+        sa.Column('tune_neutral_step', sa.Float(), nullable=False),
+        sa.Column('tune_risk_threshold_step', sa.Float(), nullable=False),
+        sa.Column('tune_sharpe_aggressive_threshold', sa.Float(), nullable=False),
+        # Sell Strategy Tuning
+        sa.Column('tune_sell_effective_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_sell_underperform_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_bearish_sell_participation', sa.Float(), nullable=False),
+        sa.Column('tune_high_dd_no_sell_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_sell_major_adjustment', sa.Float(), nullable=False),
+        sa.Column('tune_sell_minor_adjustment', sa.Float(), nullable=False),
+        # Confidence Tuning
+        sa.Column('tune_low_conf_poor_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_high_conf_strong_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_confidence_threshold_step', sa.Float(), nullable=False),
+        sa.Column('tune_confidence_scaling_step', sa.Float(), nullable=False),
+        # Mean Reversion Tuning
+        sa.Column('tune_mr_good_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_mr_poor_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_rsi_threshold_step', sa.Float(), nullable=False),
+        # Validation Thresholds
+        sa.Column('validation_sharpe_tolerance', sa.Float(), nullable=False),
+        sa.Column('validation_dd_tolerance', sa.Float(), nullable=False),
+        sa.Column('validation_passing_score', sa.Float(), nullable=False),
         # Metadata
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
         sa.Column('created_by', sa.String(length=100), nullable=True),

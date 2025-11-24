@@ -155,7 +155,9 @@ def calculate_adaptive_threshold(base_threshold: float, current_volatility: floa
     """
     vol_ratio = current_volatility / base_volatility if base_volatility > 0 else 1.0
     adjustment = 1.0 + (adjustment_factor * (vol_ratio - 1.0))
-    adjustment = max(0.7, min(1.5, adjustment))  # Clamp adjustment
+    # Clamp adjustment using tunable thresholds
+    adjustment = max(trading_config.adaptive_threshold_clamp_min,
+                     min(trading_config.adaptive_threshold_clamp_max, adjustment))
 
     return base_threshold * adjustment
 
@@ -320,11 +322,11 @@ def calculate_regime(features_by_asset: dict) -> float:
         price_vs_sma20 = features['price_vs_sma20']
         price_vs_sma50 = features['price_vs_sma50']
 
-        # Combine signals
+        # Combine signals using tunable weights
         asset_regime = (
-            momentum_avg * 0.5 +
-            price_vs_sma20 * 0.3 +
-            price_vs_sma50 * 0.2
+            momentum_avg * trading_config.regime_momentum_weight +
+            price_vs_sma20 * trading_config.regime_sma20_weight +
+            price_vs_sma50 * trading_config.regime_sma50_weight
         )
 
         regime_scores.append(asset_regime)
@@ -899,7 +901,9 @@ def generate_signal(trade_date: date = None):
 
         # Step 4: Calculate risk level
         risk_score = calculate_risk_score(features_by_asset)
-        risk_label = "HIGH" if risk_score > 70 else "MEDIUM" if risk_score > 40 else "LOW"
+        # Use tunable risk label thresholds
+        risk_label = "HIGH" if risk_score > trading_config.risk_label_high_threshold else \
+                     "MEDIUM" if risk_score > trading_config.risk_label_medium_threshold else "LOW"
         print(f"Risk Level: {risk_label} ({risk_score:.1f}/100)")
 
         # Step 5: Monitor drawdown (warning only - DO NOT stop operations)

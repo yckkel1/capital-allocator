@@ -147,6 +147,78 @@ class TradingConfig:
     trend_aligned_multiplier: float = 1.5
     trend_mixed_multiplier: float = 1.0
 
+    # Regime Calculation Weights
+    regime_momentum_weight: float = 0.5
+    regime_sma20_weight: float = 0.3
+    regime_sma50_weight: float = 0.2
+
+    # Adaptive Threshold Clamps
+    adaptive_threshold_clamp_min: float = 0.7
+    adaptive_threshold_clamp_max: float = 1.5
+
+    # Risk Label Thresholds
+    risk_label_high_threshold: float = 70.0
+    risk_label_medium_threshold: float = 40.0
+
+    # Strategy Tuning Parameters (for monthly tuning script)
+    # Market Condition Detection
+    market_condition_r_squared_threshold: float = 0.6
+    market_condition_slope_threshold: float = 0.1
+    market_condition_choppy_r_squared: float = 0.3
+    market_condition_choppy_volatility: float = 0.02
+
+    # Trade Evaluation Scoring
+    score_profitable_bonus: float = 0.3
+    score_sharpe_bonus: float = 0.2
+    score_low_dd_bonus: float = 0.2
+    score_all_horizons_bonus: float = 0.2
+    score_two_horizons_bonus: float = 0.1
+    score_unprofitable_penalty: float = -0.3
+    score_high_dd_penalty: float = -0.4
+    score_sharpe_penalty: float = -0.2
+    score_momentum_bonus: float = 0.3
+    score_choppy_penalty: float = -0.3
+    score_confidence_bonus: float = 0.1
+    score_mean_reversion_bonus: float = 0.15
+
+    # Tuning Decision Thresholds
+    tune_aggressive_win_rate: float = 65.0
+    tune_aggressive_participation: float = 0.5
+    tune_aggressive_score: float = 0.2
+    tune_conservative_win_rate: float = 45.0
+    tune_conservative_dd: float = 15.0
+    tune_conservative_score: float = -0.1
+
+    # Parameter Adjustment Amounts
+    tune_allocation_step: float = 0.1
+    tune_neutral_step: float = 0.05
+    tune_risk_threshold_step: float = 5.0
+    tune_sharpe_aggressive_threshold: float = 1.5
+
+    # Sell Strategy Tuning
+    tune_sell_effective_threshold: float = 0.7
+    tune_sell_underperform_threshold: float = -0.2
+    tune_bearish_sell_participation: float = 0.3
+    tune_high_dd_no_sell_threshold: float = 15.0
+    tune_sell_major_adjustment: float = 0.15
+    tune_sell_minor_adjustment: float = 0.1
+
+    # Confidence Tuning
+    tune_low_conf_poor_threshold: float = 40.0
+    tune_high_conf_strong_threshold: float = 70.0
+    tune_confidence_threshold_step: float = 0.05
+    tune_confidence_scaling_step: float = 0.1
+
+    # Mean Reversion Tuning
+    tune_mr_good_threshold: float = 60.0
+    tune_mr_poor_threshold: float = 45.0
+    tune_rsi_threshold_step: float = 5.0
+
+    # Validation Thresholds
+    validation_sharpe_tolerance: float = 0.8
+    validation_dd_tolerance: float = 1.2
+    validation_passing_score: float = 0.5
+
     # Metadata
     id: Optional[int] = None
     start_date: Optional[date] = None

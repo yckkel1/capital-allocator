@@ -328,6 +328,19 @@ class TradingConfig(Base):
     validation_dd_tolerance = Column(Float, nullable=False, default=1.2)
     validation_passing_score = Column(Float, nullable=False, default=0.5)
 
+    # Regime Calculation Weights
+    regime_momentum_weight = Column(Float, nullable=False, default=0.5)
+    regime_sma20_weight = Column(Float, nullable=False, default=0.3)
+    regime_sma50_weight = Column(Float, nullable=False, default=0.2)
+
+    # Adaptive Threshold Clamps
+    adaptive_threshold_clamp_min = Column(Float, nullable=False, default=0.7)
+    adaptive_threshold_clamp_max = Column(Float, nullable=False, default=1.5)
+
+    # Risk Label Thresholds
+    risk_label_high_threshold = Column(Float, nullable=False, default=70.0)
+    risk_label_medium_threshold = Column(Float, nullable=False, default=40.0)
+
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     created_by = Column(String(100), nullable=True)  # Who created this version (user/script)
