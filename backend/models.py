@@ -327,6 +327,36 @@ class TradingConfig(Base):
     validation_sharpe_tolerance = Column(Float, nullable=False, default=0.8)
     validation_dd_tolerance = Column(Float, nullable=False, default=1.2)
     validation_passing_score = Column(Float, nullable=False, default=0.5)
+    validation_sharpe_weight = Column(Float, nullable=False, default=0.5)
+    validation_drawdown_weight = Column(Float, nullable=False, default=0.5)
+
+    # Trade Evaluation DD Thresholds
+    score_dd_low_threshold = Column(Float, nullable=False, default=5.0)
+    score_dd_high_threshold = Column(Float, nullable=False, default=20.0)
+
+    # Parameter Tuning Boundary Limits
+    # Allocation Limits
+    tune_allocation_low_risk_max = Column(Float, nullable=False, default=1.0)
+    tune_allocation_low_risk_min = Column(Float, nullable=False, default=0.5)
+    tune_allocation_medium_risk_max = Column(Float, nullable=False, default=0.7)
+    tune_allocation_medium_risk_min = Column(Float, nullable=False, default=0.3)
+    tune_allocation_high_risk_min = Column(Float, nullable=False, default=0.2)
+    tune_allocation_neutral_min = Column(Float, nullable=False, default=0.1)
+    # Risk Threshold Limits
+    tune_risk_medium_threshold_min = Column(Float, nullable=False, default=30.0)
+    tune_risk_high_threshold_min = Column(Float, nullable=False, default=60.0)
+    # Regime Threshold Limits
+    tune_regime_bullish_threshold_max = Column(Float, nullable=False, default=0.4)
+    tune_regime_bullish_threshold_min = Column(Float, nullable=False, default=0.2)
+    # Sell Percentage Limits
+    tune_sell_percentage_min = Column(Float, nullable=False, default=0.3)
+    tune_sell_percentage_max = Column(Float, nullable=False, default=0.9)
+    # Confidence Parameter Limits
+    tune_min_confidence_threshold_max = Column(Float, nullable=False, default=0.5)
+    tune_confidence_scaling_factor_max = Column(Float, nullable=False, default=0.8)
+    # Mean Reversion Limits
+    tune_mean_reversion_allocation_max = Column(Float, nullable=False, default=0.6)
+    tune_rsi_oversold_threshold_min = Column(Float, nullable=False, default=20.0)
 
     # Regime Calculation Weights
     regime_momentum_weight = Column(Float, nullable=False, default=0.5)

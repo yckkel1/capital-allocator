@@ -218,6 +218,36 @@ class TradingConfig:
     validation_sharpe_tolerance: float = 0.8
     validation_dd_tolerance: float = 1.2
     validation_passing_score: float = 0.5
+    validation_sharpe_weight: float = 0.5
+    validation_drawdown_weight: float = 0.5
+
+    # Trade Evaluation DD Thresholds
+    score_dd_low_threshold: float = 5.0
+    score_dd_high_threshold: float = 20.0
+
+    # Parameter Tuning Boundary Limits
+    # Allocation Limits
+    tune_allocation_low_risk_max: float = 1.0
+    tune_allocation_low_risk_min: float = 0.5
+    tune_allocation_medium_risk_max: float = 0.7
+    tune_allocation_medium_risk_min: float = 0.3
+    tune_allocation_high_risk_min: float = 0.2
+    tune_allocation_neutral_min: float = 0.1
+    # Risk Threshold Limits
+    tune_risk_medium_threshold_min: float = 30.0
+    tune_risk_high_threshold_min: float = 60.0
+    # Regime Threshold Limits
+    tune_regime_bullish_threshold_max: float = 0.4
+    tune_regime_bullish_threshold_min: float = 0.2
+    # Sell Percentage Limits
+    tune_sell_percentage_min: float = 0.3
+    tune_sell_percentage_max: float = 0.9
+    # Confidence Parameter Limits
+    tune_min_confidence_threshold_max: float = 0.5
+    tune_confidence_scaling_factor_max: float = 0.8
+    # Mean Reversion Limits
+    tune_mean_reversion_allocation_max: float = 0.6
+    tune_rsi_oversold_threshold_min: float = 20.0
 
     # Metadata
     id: Optional[int] = None

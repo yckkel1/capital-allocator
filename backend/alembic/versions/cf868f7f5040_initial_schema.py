@@ -300,6 +300,34 @@ def upgrade() -> None:
         sa.Column('validation_sharpe_tolerance', sa.Float(), nullable=False),
         sa.Column('validation_dd_tolerance', sa.Float(), nullable=False),
         sa.Column('validation_passing_score', sa.Float(), nullable=False),
+        sa.Column('validation_sharpe_weight', sa.Float(), nullable=False),
+        sa.Column('validation_drawdown_weight', sa.Float(), nullable=False),
+        # Trade Evaluation DD Thresholds
+        sa.Column('score_dd_low_threshold', sa.Float(), nullable=False),
+        sa.Column('score_dd_high_threshold', sa.Float(), nullable=False),
+        # Parameter Tuning Boundary Limits
+        # Allocation Limits
+        sa.Column('tune_allocation_low_risk_max', sa.Float(), nullable=False),
+        sa.Column('tune_allocation_low_risk_min', sa.Float(), nullable=False),
+        sa.Column('tune_allocation_medium_risk_max', sa.Float(), nullable=False),
+        sa.Column('tune_allocation_medium_risk_min', sa.Float(), nullable=False),
+        sa.Column('tune_allocation_high_risk_min', sa.Float(), nullable=False),
+        sa.Column('tune_allocation_neutral_min', sa.Float(), nullable=False),
+        # Risk Threshold Limits
+        sa.Column('tune_risk_medium_threshold_min', sa.Float(), nullable=False),
+        sa.Column('tune_risk_high_threshold_min', sa.Float(), nullable=False),
+        # Regime Threshold Limits
+        sa.Column('tune_regime_bullish_threshold_max', sa.Float(), nullable=False),
+        sa.Column('tune_regime_bullish_threshold_min', sa.Float(), nullable=False),
+        # Sell Percentage Limits
+        sa.Column('tune_sell_percentage_min', sa.Float(), nullable=False),
+        sa.Column('tune_sell_percentage_max', sa.Float(), nullable=False),
+        # Confidence Parameter Limits
+        sa.Column('tune_min_confidence_threshold_max', sa.Float(), nullable=False),
+        sa.Column('tune_confidence_scaling_factor_max', sa.Float(), nullable=False),
+        # Mean Reversion Limits
+        sa.Column('tune_mean_reversion_allocation_max', sa.Float(), nullable=False),
+        sa.Column('tune_rsi_oversold_threshold_min', sa.Float(), nullable=False),
         # Metadata
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
         sa.Column('created_by', sa.String(length=100), nullable=True),

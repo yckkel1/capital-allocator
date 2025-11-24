@@ -75,6 +75,18 @@ INSERT INTO trading_config (
   tune_mr_good_threshold, tune_mr_poor_threshold, tune_rsi_threshold_step,
   -- Validation Thresholds
   validation_sharpe_tolerance, validation_dd_tolerance, validation_passing_score,
+  validation_sharpe_weight, validation_drawdown_weight,
+  -- Trade Evaluation DD Thresholds
+  score_dd_low_threshold, score_dd_high_threshold,
+  -- Parameter Tuning Boundary Limits
+  tune_allocation_low_risk_max, tune_allocation_low_risk_min,
+  tune_allocation_medium_risk_max, tune_allocation_medium_risk_min,
+  tune_allocation_high_risk_min, tune_allocation_neutral_min,
+  tune_risk_medium_threshold_min, tune_risk_high_threshold_min,
+  tune_regime_bullish_threshold_max, tune_regime_bullish_threshold_min,
+  tune_sell_percentage_min, tune_sell_percentage_max,
+  tune_min_confidence_threshold_max, tune_confidence_scaling_factor_max,
+  tune_mean_reversion_allocation_max, tune_rsi_oversold_threshold_min,
   -- Metadata
   created_by, notes
 ) VALUES (
@@ -161,6 +173,18 @@ INSERT INTO trading_config (
   60.0, 45.0, 5.0,
   -- Validation Thresholds
   0.8, 1.2, 0.5,
+  0.5, 0.5,
+  -- Trade Evaluation DD Thresholds
+  5.0, 20.0,
+  -- Parameter Tuning Boundary Limits
+  1.0, 0.5,  -- allocation_low_risk max/min
+  0.7, 0.3,  -- allocation_medium_risk max/min
+  0.2, 0.1,  -- allocation_high_risk_min, allocation_neutral_min
+  30.0, 60.0,  -- risk_medium_threshold_min, risk_high_threshold_min
+  0.4, 0.2,  -- regime_bullish_threshold max/min
+  0.3, 0.9,  -- sell_percentage min/max
+  0.5, 0.8,  -- min_confidence_threshold_max, confidence_scaling_factor_max
+  0.6, 20.0,  -- mean_reversion_allocation_max, rsi_oversold_threshold_min
   -- Metadata
   'initial_deployment',
   'Default configuration with all tunable parameters'
