@@ -73,6 +73,8 @@ class StrategyTuner:
         self.config_loader = ConfigLoader(DATABASE_URL)
         # Load current active parameters from database
         self.current_params = self.config_loader.get_active_config()
+        # Make config accessible for tunable thresholds
+        self.config = self.current_params
 
     def close(self):
         self.cursor.close()
@@ -141,13 +143,15 @@ class StrategyTuner:
         returns = np.diff(prices) / prices[:-1]
         volatility = np.std(returns)
 
-        # Decision logic:
-        # Strong momentum: High R-squared (>0.6) and clear trend
-        # Choppy: Low R-squared (<0.3) or high volatility with no clear trend
+        # Decision logic using tunable thresholds:
+        # Strong momentum: High R-squared and clear trend
+        # Choppy: Low R-squared or high volatility with no clear trend
 
-        if r_squared > 0.6 and abs(slope) > 0.1:
+        if r_squared > self.config.market_condition_r_squared_threshold and \
+           abs(slope) > self.config.market_condition_slope_threshold:
             return 'momentum'
-        elif r_squared < 0.3 or volatility > 0.02:
+        elif r_squared < self.config.market_condition_choppy_r_squared or \
+             volatility > self.config.market_condition_choppy_volatility:
             return 'choppy'
         else:
             return 'mixed'
@@ -276,56 +280,57 @@ class StrategyTuner:
             # Calculate contribution to drawdown
             drawdown_contribution = self.calculate_drawdown_contribution(trade_date, pnl_horizons['10d'])
 
-            # Calculate Sharpe impact (simplified - based on if trade aligned with profitable regime)
+            # Calculate Sharpe impact using tunable bonuses/penalties
+            # Based on if trade aligned with profitable regime
             sharpe_impact = 0.0
             if market_condition == 'momentum' and action == 'BUY' and regime == 'bullish':
-                sharpe_impact = 0.1  # Positive impact
+                sharpe_impact = self.config.score_momentum_bonus
             elif market_condition == 'choppy' and action == 'HOLD':
-                sharpe_impact = 0.05  # Avoided risk
+                sharpe_impact = self.config.score_momentum_bonus * 0.5  # Half bonus for avoiding risk
             elif market_condition == 'choppy' and action == 'BUY':
-                sharpe_impact = -0.1  # Added risk in choppy market
+                sharpe_impact = self.config.score_choppy_penalty
 
-            # NEW: Bonus for mean reversion trades that work
+            # Bonus for mean reversion trades that work (tunable)
             if signal_type and 'mean_reversion' in signal_type and was_profitable:
-                sharpe_impact += 0.15
+                sharpe_impact += self.config.score_mean_reversion_bonus
 
-            # Calculate trade score (-1 to 1) with enhanced logic
+            # Calculate trade score (-1 to 1) using tunable scoring parameters
             score = 0.0
 
-            # Positive factors
+            # Positive factors (all tunable)
             if was_profitable:
-                score += 0.3
+                score += self.config.score_profitable_bonus
             if sharpe_impact > 0:
-                score += 0.2
+                score += self.config.score_sharpe_bonus
             if drawdown_contribution < 5:  # Low DD contribution is good
-                score += 0.2
+                score += self.config.score_low_dd_bonus
 
-            # NEW: Multi-horizon consistency bonus
+            # Multi-horizon consistency bonus (tunable)
             profitable_horizons = sum(1 for p in pnl_horizons.values() if p > 0)
             if profitable_horizons == 3:
-                score += 0.2  # Profitable at all horizons
+                score += self.config.score_all_horizons_bonus
             elif profitable_horizons == 2:
-                score += 0.1  # Profitable at 2 horizons
+                score += self.config.score_two_horizons_bonus
 
-            # Negative factors
+            # Negative factors (all tunable)
             if not was_profitable:
-                score -= 0.3
+                score += self.config.score_unprofitable_penalty  # Already negative
             if drawdown_contribution > 20:  # High DD contribution is bad
-                score -= 0.4
+                score += self.config.score_high_dd_penalty  # Already negative
             if sharpe_impact < 0:
-                score -= 0.2
+                score += self.config.score_sharpe_penalty  # Already negative
 
-            # Market condition alignment
+            # Market condition alignment (tunable)
             if market_condition == 'momentum' and action == 'BUY' and was_profitable:
-                score += 0.3
+                score += self.config.score_momentum_bonus
             elif market_condition == 'choppy' and action == 'BUY' and not was_profitable:
-                score -= 0.3
+                score += self.config.score_choppy_penalty  # Already negative
 
-            # NEW: Confidence bucket scoring
+            # Confidence bucket scoring (tunable)
             if confidence_bucket == 'high' and was_profitable:
-                score += 0.1  # High confidence trades should be profitable
+                score += self.config.score_confidence_bonus
             elif confidence_bucket == 'low' and not was_profitable:
-                score += 0.1  # Low confidence trades avoiding losses is good
+                score += self.config.score_confidence_bonus  # Avoiding losses is good
 
             score = max(-1.0, min(1.0, score))  # Clamp to [-1, 1]
 
@@ -389,20 +394,22 @@ class StrategyTuner:
             total_pnl = sum(t.pnl for t in trades)
             avg_dd = sum(t.contribution_to_drawdown for t in trades) / len(trades)
 
-            # Determine if strategy should be adjusted
+            # Determine if strategy should be adjusted (using tunable thresholds)
             buy_trades = [t for t in trades if t.action == 'BUY']
             hold_trades = [t for t in trades if t.action == 'HOLD']
 
-            # Should be more aggressive if: high win rate but low participation
+            # Should be more aggressive if: high win rate but low participation (all tunable)
             should_be_more_aggressive = (
-                win_rate > 65 and
-                len(buy_trades) < len(trades) * 0.5 and
-                avg_score > 0.2
+                win_rate > self.config.tune_aggressive_win_rate and
+                len(buy_trades) < len(trades) * self.config.tune_aggressive_participation and
+                avg_score > self.config.tune_aggressive_score
             )
 
-            # Should be more conservative if: low win rate or high DD contribution
+            # Should be more conservative if: low win rate or high DD contribution (all tunable)
             should_be_more_conservative = (
-                win_rate < 45 or avg_dd > 15 or avg_score < -0.1
+                win_rate < self.config.tune_conservative_win_rate or
+                avg_dd > self.config.tune_conservative_dd or
+                avg_score < self.config.tune_conservative_score
             )
 
             return {
@@ -523,9 +530,11 @@ class StrategyTuner:
         # Get test period performance
         test_metrics = self.calculate_overall_metrics(test_start, test_end)
 
-        # Compare against targets
-        sharpe_passes = test_metrics.get('sharpe_ratio', 0) >= candidate_params.min_sharpe_target * 0.8
-        drawdown_passes = test_metrics.get('max_drawdown', 100) <= candidate_params.max_drawdown_tolerance * 1.2
+        # Compare against targets using tunable tolerance thresholds
+        sharpe_passes = test_metrics.get('sharpe_ratio', 0) >= \
+                       candidate_params.min_sharpe_target * self.config.validation_sharpe_tolerance
+        drawdown_passes = test_metrics.get('max_drawdown', 100) <= \
+                         candidate_params.max_drawdown_tolerance * self.config.validation_dd_tolerance
 
         # Overall validation score
         validation_score = 0
@@ -535,7 +544,7 @@ class StrategyTuner:
             validation_score += 0.5
 
         return {
-            'passes_validation': validation_score >= 0.5,
+            'passes_validation': validation_score >= self.config.validation_passing_score,
             'validation_score': validation_score,
             'test_sharpe': test_metrics.get('sharpe_ratio', 0),
             'test_max_drawdown': test_metrics.get('max_drawdown', 0),
@@ -644,43 +653,43 @@ class StrategyTuner:
         choppy_perf = condition_analysis['choppy']
         overall_perf = condition_analysis['overall']
 
-        # 1. Adjust allocation based on momentum performance
+        # 1. Adjust allocation based on momentum performance (using tunable steps)
         if momentum_perf['should_be_more_aggressive']:
             # Increase allocations during low/medium risk
-            new_params.allocation_low_risk = min(1.0, new_params.allocation_low_risk + 0.1)
-            new_params.allocation_medium_risk = min(0.7, new_params.allocation_medium_risk + 0.1)
+            new_params.allocation_low_risk = min(1.0, new_params.allocation_low_risk + self.config.tune_allocation_step)
+            new_params.allocation_medium_risk = min(0.7, new_params.allocation_medium_risk + self.config.tune_allocation_step)
             print("  📈 Detected: Too conservative during momentum - increasing allocations")
 
         if momentum_perf['should_be_more_conservative']:
             # Decrease allocations
-            new_params.allocation_low_risk = max(0.5, new_params.allocation_low_risk - 0.1)
-            new_params.allocation_medium_risk = max(0.3, new_params.allocation_medium_risk - 0.1)
+            new_params.allocation_low_risk = max(0.5, new_params.allocation_low_risk - self.config.tune_allocation_step)
+            new_params.allocation_medium_risk = max(0.3, new_params.allocation_medium_risk - self.config.tune_allocation_step)
             print("  📉 Detected: Too aggressive during momentum - decreasing allocations")
 
-        # 2. Adjust choppy market behavior
+        # 2. Adjust choppy market behavior (using tunable steps)
         if choppy_perf['should_be_more_conservative']:
             # Reduce neutral allocation
-            new_params.allocation_neutral = max(0.1, new_params.allocation_neutral - 0.05)
-            new_params.risk_medium_threshold = max(30.0, new_params.risk_medium_threshold - 5)
+            new_params.allocation_neutral = max(0.1, new_params.allocation_neutral - self.config.tune_neutral_step)
+            new_params.risk_medium_threshold = max(30.0, new_params.risk_medium_threshold - self.config.tune_risk_threshold_step)
             print("  🌊 Detected: Too aggressive in choppy markets - reducing exposure")
 
-        # 3. Adjust max drawdown tolerance based on actual drawdown
+        # 3. Adjust max drawdown tolerance based on actual drawdown (using tunable steps)
         if overall_metrics.get('max_drawdown', 0) > new_params.max_drawdown_tolerance:
             # Tighten risk controls
-            new_params.risk_high_threshold = max(60.0, new_params.risk_high_threshold - 5)
-            new_params.allocation_high_risk = max(0.2, new_params.allocation_high_risk - 0.05)
+            new_params.risk_high_threshold = max(60.0, new_params.risk_high_threshold - self.config.tune_risk_threshold_step)
+            new_params.allocation_high_risk = max(0.2, new_params.allocation_high_risk - self.config.tune_neutral_step)
             print(f"  ⚠️  Max drawdown ({overall_metrics['max_drawdown']:.1f}%) exceeded tolerance - tightening risk")
 
-        # 4. Adjust based on Sharpe ratio
+        # 4. Adjust based on Sharpe ratio (using tunable steps)
         sharpe = overall_metrics.get('sharpe_ratio', 0)
         if sharpe < new_params.min_sharpe_target:
             # Improve risk-adjusted returns by being more selective
-            new_params.regime_bullish_threshold = min(0.4, new_params.regime_bullish_threshold + 0.05)
-            new_params.risk_medium_threshold = max(30.0, new_params.risk_medium_threshold - 5)
+            new_params.regime_bullish_threshold = min(0.4, new_params.regime_bullish_threshold + self.config.tune_neutral_step)
+            new_params.risk_medium_threshold = max(30.0, new_params.risk_medium_threshold - self.config.tune_risk_threshold_step)
             print(f"  📊 Sharpe ratio ({sharpe:.2f}) below target - increasing selectivity")
-        elif sharpe > new_params.min_sharpe_target * 1.5:
+        elif sharpe > new_params.min_sharpe_target * self.config.tune_sharpe_aggressive_threshold:
             # We can afford to be slightly more aggressive
-            new_params.regime_bullish_threshold = max(0.2, new_params.regime_bullish_threshold - 0.05)
+            new_params.regime_bullish_threshold = max(0.2, new_params.regime_bullish_threshold - self.config.tune_neutral_step)
             print(f"  ✨ Sharpe ratio ({sharpe:.2f}) strong - can be more aggressive")
 
         # 5. Adjust sell strategy based on performance - ENHANCED
@@ -700,59 +709,59 @@ class StrategyTuner:
             print(f"    Avg score: {avg_sell_score:+.2f}")
             print(f"    Avoided DD: {sells_avoided_dd*100:.1f}%")
 
-            # If sells are preventing drawdowns well, keep current sell_percentage
-            if sell_effectiveness > 0.7 and sells_avoided_dd > 0.7:
+            # If sells are preventing drawdowns well, keep current sell_percentage (tunable threshold)
+            if sell_effectiveness > self.config.tune_sell_effective_threshold and sells_avoided_dd > self.config.tune_sell_effective_threshold:
                 print(f"  ✅ SELL strategy working well - maintaining sell_percentage")
-            # If sells aren't effective (scoring poorly), reduce sell frequency
-            elif avg_sell_score < -0.2:
-                new_params.sell_percentage = max(0.3, new_params.sell_percentage - 0.1)
+            # If sells aren't effective (scoring poorly), reduce sell frequency (tunable threshold)
+            elif avg_sell_score < self.config.tune_sell_underperform_threshold:
+                new_params.sell_percentage = max(0.3, new_params.sell_percentage - self.config.tune_sell_minor_adjustment)
                 print(f"  ⚠️  SELL trades underperforming - decreasing sell_percentage to be more selective")
-            # If not selling enough during bearish periods, increase
-            elif bearish_evals and len(sell_evals) < len(bearish_evals) * 0.3:
-                new_params.sell_percentage = min(0.9, new_params.sell_percentage + 0.1)
+            # If not selling enough during bearish periods, increase (tunable threshold)
+            elif bearish_evals and len(sell_evals) < len(bearish_evals) * self.config.tune_bearish_sell_participation:
+                new_params.sell_percentage = min(0.9, new_params.sell_percentage + self.config.tune_sell_minor_adjustment)
                 print(f"  🔻 Not selling enough in bearish periods - increasing sell_percentage")
 
-        # If no sells happened but we had high drawdowns, we need to sell more!
-        elif overall_metrics.get('max_drawdown', 0) > 15:
-            new_params.sell_percentage = min(0.9, new_params.sell_percentage + 0.15)
+        # If no sells happened but we had high drawdowns, we need to sell more! (tunable threshold)
+        elif overall_metrics.get('max_drawdown', 0) > self.config.tune_high_dd_no_sell_threshold:
+            new_params.sell_percentage = min(0.9, new_params.sell_percentage + self.config.tune_sell_major_adjustment)
             print(f"  ⚠️  High drawdown ({overall_metrics['max_drawdown']:.1f}%) with no SELL trades - significantly increasing sell_percentage")
 
-        # Specific bearish regime handling
+        # Specific bearish regime handling (tunable threshold)
         if bearish_evals:
             avg_bearish_score = sum(e.score for e in bearish_evals) / len(bearish_evals)
-            if avg_bearish_score < -0.2:
+            if avg_bearish_score < self.config.tune_sell_underperform_threshold:
                 # Poor bearish performance - need faster sells
-                new_params.sell_percentage = min(0.9, new_params.sell_percentage + 0.1)
+                new_params.sell_percentage = min(0.9, new_params.sell_percentage + self.config.tune_sell_minor_adjustment)
                 print(f"  🔻 Poor bearish performance (score: {avg_bearish_score:+.2f}) - increasing sell percentage")
 
-        # NEW: 6. Tune confidence-based parameters
+        # NEW: 6. Tune confidence-based parameters (using tunable thresholds)
         if confidence_analysis:
             low_conf = confidence_analysis.get('low', {})
             high_conf = confidence_analysis.get('high', {})
 
-            # If low confidence trades are losing money, raise the threshold
-            if low_conf.get('count', 0) > 0 and low_conf.get('win_rate', 50) < 40:
-                new_params.min_confidence_threshold = min(0.5, new_params.min_confidence_threshold + 0.05)
+            # If low confidence trades are losing money, raise the threshold (tunable)
+            if low_conf.get('count', 0) > 0 and low_conf.get('win_rate', 50) < self.config.tune_low_conf_poor_threshold:
+                new_params.min_confidence_threshold = min(0.5, new_params.min_confidence_threshold + self.config.tune_confidence_threshold_step)
                 print(f"  🎯 Low confidence trades underperforming ({low_conf['win_rate']:.1f}%) - raising threshold")
 
-            # If high confidence trades are very profitable, increase scaling factor
-            if high_conf.get('count', 0) > 0 and high_conf.get('win_rate', 50) > 70:
-                new_params.confidence_scaling_factor = min(0.8, new_params.confidence_scaling_factor + 0.1)
+            # If high confidence trades are very profitable, increase scaling factor (tunable)
+            if high_conf.get('count', 0) > 0 and high_conf.get('win_rate', 50) > self.config.tune_high_conf_strong_threshold:
+                new_params.confidence_scaling_factor = min(0.8, new_params.confidence_scaling_factor + self.config.tune_confidence_scaling_step)
                 print(f"  💎 High confidence trades performing well ({high_conf['win_rate']:.1f}%) - increasing sizing")
 
-        # NEW: 7. Tune mean reversion parameters
+        # NEW: 7. Tune mean reversion parameters (using tunable thresholds)
         if signal_type_analysis:
             mr_oversold = signal_type_analysis.get('mean_reversion_oversold', {})
             momentum_signals = signal_type_analysis.get('bullish_momentum', {})
 
-            # If mean reversion signals are working, increase allocation
-            if mr_oversold.get('count', 0) > 0 and mr_oversold.get('win_rate', 50) > 60:
-                new_params.mean_reversion_allocation = min(0.6, new_params.mean_reversion_allocation + 0.05)
+            # If mean reversion signals are working, increase allocation (tunable)
+            if mr_oversold.get('count', 0) > 0 and mr_oversold.get('win_rate', 50) > self.config.tune_mr_good_threshold:
+                new_params.mean_reversion_allocation = min(0.6, new_params.mean_reversion_allocation + self.config.tune_neutral_step)
                 print(f"  📊 Mean reversion signals profitable ({mr_oversold['win_rate']:.1f}%) - increasing allocation")
 
-            # If mean reversion signals are losing, be more selective
-            if mr_oversold.get('count', 0) > 0 and mr_oversold.get('win_rate', 50) < 45:
-                new_params.rsi_oversold_threshold = max(20.0, new_params.rsi_oversold_threshold - 5)
+            # If mean reversion signals are losing, be more selective (tunable)
+            if mr_oversold.get('count', 0) > 0 and mr_oversold.get('win_rate', 50) < self.config.tune_mr_poor_threshold:
+                new_params.rsi_oversold_threshold = max(20.0, new_params.rsi_oversold_threshold - self.config.tune_rsi_threshold_step)
                 print(f"  📉 Mean reversion signals underperforming - tightening RSI threshold")
 
         # REMOVED: Circuit breaker tuning - strategy should learn from mistakes, not cease operations
