@@ -269,6 +269,65 @@ class TradingConfig(Base):
     trend_aligned_multiplier = Column(Float, nullable=False, default=1.5)
     trend_mixed_multiplier = Column(Float, nullable=False, default=1.0)
 
+    # Strategy Tuning Parameters (for monthly tuning script)
+    # Market Condition Detection
+    market_condition_r_squared_threshold = Column(Float, nullable=False, default=0.6)
+    market_condition_slope_threshold = Column(Float, nullable=False, default=0.1)
+    market_condition_choppy_r_squared = Column(Float, nullable=False, default=0.3)
+    market_condition_choppy_volatility = Column(Float, nullable=False, default=0.02)
+
+    # Trade Evaluation Scoring
+    score_profitable_bonus = Column(Float, nullable=False, default=0.3)
+    score_sharpe_bonus = Column(Float, nullable=False, default=0.2)
+    score_low_dd_bonus = Column(Float, nullable=False, default=0.2)
+    score_all_horizons_bonus = Column(Float, nullable=False, default=0.2)
+    score_two_horizons_bonus = Column(Float, nullable=False, default=0.1)
+    score_unprofitable_penalty = Column(Float, nullable=False, default=-0.3)
+    score_high_dd_penalty = Column(Float, nullable=False, default=-0.4)
+    score_sharpe_penalty = Column(Float, nullable=False, default=-0.2)
+    score_momentum_bonus = Column(Float, nullable=False, default=0.3)
+    score_choppy_penalty = Column(Float, nullable=False, default=-0.3)
+    score_confidence_bonus = Column(Float, nullable=False, default=0.1)
+    score_mean_reversion_bonus = Column(Float, nullable=False, default=0.15)
+
+    # Tuning Decision Thresholds
+    tune_aggressive_win_rate = Column(Float, nullable=False, default=65.0)
+    tune_aggressive_participation = Column(Float, nullable=False, default=0.5)
+    tune_aggressive_score = Column(Float, nullable=False, default=0.2)
+    tune_conservative_win_rate = Column(Float, nullable=False, default=45.0)
+    tune_conservative_dd = Column(Float, nullable=False, default=15.0)
+    tune_conservative_score = Column(Float, nullable=False, default=-0.1)
+
+    # Parameter Adjustment Amounts
+    tune_allocation_step = Column(Float, nullable=False, default=0.1)
+    tune_neutral_step = Column(Float, nullable=False, default=0.05)
+    tune_risk_threshold_step = Column(Float, nullable=False, default=5.0)
+    tune_sharpe_aggressive_threshold = Column(Float, nullable=False, default=1.5)
+
+    # Sell Strategy Tuning
+    tune_sell_effective_threshold = Column(Float, nullable=False, default=0.7)
+    tune_sell_underperform_threshold = Column(Float, nullable=False, default=-0.2)
+    tune_bearish_sell_participation = Column(Float, nullable=False, default=0.3)
+    tune_high_dd_no_sell_threshold = Column(Float, nullable=False, default=15.0)
+    tune_sell_major_adjustment = Column(Float, nullable=False, default=0.15)
+    tune_sell_minor_adjustment = Column(Float, nullable=False, default=0.1)
+
+    # Confidence Tuning
+    tune_low_conf_poor_threshold = Column(Float, nullable=False, default=40.0)
+    tune_high_conf_strong_threshold = Column(Float, nullable=False, default=70.0)
+    tune_confidence_threshold_step = Column(Float, nullable=False, default=0.05)
+    tune_confidence_scaling_step = Column(Float, nullable=False, default=0.1)
+
+    # Mean Reversion Tuning
+    tune_mr_good_threshold = Column(Float, nullable=False, default=60.0)
+    tune_mr_poor_threshold = Column(Float, nullable=False, default=45.0)
+    tune_rsi_threshold_step = Column(Float, nullable=False, default=5.0)
+
+    # Validation Thresholds
+    validation_sharpe_tolerance = Column(Float, nullable=False, default=0.8)
+    validation_dd_tolerance = Column(Float, nullable=False, default=1.2)
+    validation_passing_score = Column(Float, nullable=False, default=0.5)
+
     # Metadata
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     created_by = Column(String(100), nullable=True)  # Who created this version (user/script)
