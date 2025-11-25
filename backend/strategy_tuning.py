@@ -235,7 +235,7 @@ class StrategyTuner:
 
             features = trade['features_used']
             regime_score = features.get('regime', 0)
-            regime = 'bullish' if regime_score > 0.3 else 'bearish' if regime_score < -0.3 else 'neutral'
+            regime = 'bullish' if regime_score > self.config.regime_classification_bullish_threshold else 'bearish' if regime_score < self.config.regime_classification_bearish_threshold else 'neutral'
 
             # NEW: Extract confidence bucket and signal type from features
             confidence_bucket = features.get('confidence_bucket', 'unknown')
@@ -286,7 +286,7 @@ class StrategyTuner:
             if market_condition == 'momentum' and action == 'BUY' and regime == 'bullish':
                 sharpe_impact = self.config.score_momentum_bonus
             elif market_condition == 'choppy' and action == 'HOLD':
-                sharpe_impact = self.config.score_momentum_bonus * 0.5  # Half bonus for avoiding risk
+                sharpe_impact = self.config.score_momentum_bonus * self.config.score_hold_bonus_multiplier
             elif market_condition == 'choppy' and action == 'BUY':
                 sharpe_impact = self.config.score_choppy_penalty
 
@@ -338,9 +338,9 @@ class StrategyTuner:
 
             # Should have avoided?
             should_have_avoided = (
-                drawdown_contribution > 20 or
+                drawdown_contribution > self.config.should_avoid_dd_threshold or
                 (market_condition == 'choppy' and action == 'BUY' and not was_profitable) or
-                (confidence_bucket == 'low' and not was_profitable and pnl_horizons['10d'] < -50)
+                (confidence_bucket == 'low' and not was_profitable and pnl_horizons['10d'] < self.config.should_avoid_loss_threshold)
             )
 
             evaluation = TradeEvaluation(
@@ -846,10 +846,10 @@ class StrategyTuner:
         add(f"{'='*80}\n")
 
         bad_trades = [e for e in evaluations if e.should_have_avoided]
-        good_trades = [e for e in evaluations if e.score > 0.3]
+        good_trades = [e for e in evaluations if e.score > self.config.good_trade_score_threshold]
 
         add(f"Total Trades Analyzed: {len(evaluations)}")
-        add(f"Good Trades (score > 0.3): {len(good_trades)} ({len(good_trades)/len(evaluations)*100:.1f}%)")
+        add(f"Good Trades (score > {self.config.good_trade_score_threshold}): {len(good_trades)} ({len(good_trades)/len(evaluations)*100:.1f}%)")
         add(f"Trades That Should Have Been Avoided: {len(bad_trades)} ({len(bad_trades)/len(evaluations)*100:.1f}%)")
         add()
 
@@ -937,10 +937,10 @@ class StrategyTuner:
         if overall_metrics.get('sharpe_ratio', 0) < old_params.min_sharpe_target:
             add(f"📊 Sharpe ratio below target - focus on risk-adjusted returns")
 
-        if condition_analysis['choppy']['avg_drawdown_contribution'] > 20:
+        if condition_analysis['choppy']['avg_drawdown_contribution'] > self.config.report_choppy_high_dd_threshold:
             add(f"🌊 High drawdown in choppy markets - reduce exposure during uncertainty")
 
-        if condition_analysis['momentum']['win_rate'] > 70 and condition_analysis['momentum']['buy_count'] < condition_analysis['momentum']['count'] * 0.5:
+        if condition_analysis['momentum']['win_rate'] > self.config.report_momentum_strong_win_rate and condition_analysis['momentum']['buy_count'] < condition_analysis['momentum']['count'] * self.config.report_momentum_participation_threshold:
             add(f"📈 Missing opportunities in momentum markets - consider more aggressive positioning")
 
         add()

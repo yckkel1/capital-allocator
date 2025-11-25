@@ -543,7 +543,7 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
             if cash_pct > trading_config.defensive_cash_threshold:
                 sell_pct = min(trading_config.sell_percentage * trading_config.sell_defensive_multiplier, trading_config.sell_percentage)
             else:
-                sell_pct = min(0.9, trading_config.sell_percentage * trading_config.sell_aggressive_multiplier)
+                sell_pct = min(trading_config.sell_percentage_max, trading_config.sell_percentage * trading_config.sell_aggressive_multiplier)
             return ("SELL", sell_pct, f"downward_pressure_severe")
         elif pressure_severity == "moderate" and regime_score < trading_config.regime_transition_threshold:
             # Moderate pressure in non-bullish regime - reduce exposure unless already very defensive
@@ -563,10 +563,9 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
     # Bearish regime
     if regime_score < adaptive_bearish_threshold:
         if has_holdings:
-            # Use tunable sell_percentage instead of hardcoded formula
-            # Scale it by how bearish: more bearish = sell more
+            # Scale sell percentage by bearish intensity
             bearish_intensity = abs(regime_score - adaptive_bearish_threshold) / (1.0 - adaptive_bearish_threshold)
-            sell_pct = min(trading_config.sell_percentage, 0.3 + (bearish_intensity * 0.4))
+            sell_pct = min(trading_config.sell_percentage, trading_config.bearish_sell_base + (bearish_intensity * trading_config.bearish_sell_intensity_multiplier))
             return ("SELL", sell_pct, "bearish_regime")
         else:
             return ("HOLD", 0.0, "bearish_no_holdings")
