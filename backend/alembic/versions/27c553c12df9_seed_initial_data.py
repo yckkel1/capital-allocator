@@ -90,6 +90,34 @@ def upgrade() -> None:
     else:
         print(f"Trading config already has {config_count} records, skipping seed data")
 
+    # Check if strategy_constraints table is empty
+    result = conn.execute(text("SELECT COUNT(*) FROM strategy_constraints")).fetchone()
+    constraints_count = result[0] if result else 0
+
+    if constraints_count == 0:
+        print("Loading initial strategy constraints...")
+
+        # Load strategy constraints if file exists
+        seed_data_dir = Path(__file__).parent.parent / "seed_data"
+        constraints_file = seed_data_dir / "strategy_constraints_initial.sql"
+
+        if constraints_file.exists():
+            print(f"  Loading from {constraints_file}")
+            sql_content = constraints_file.read_text()
+
+            # Execute SQL
+            statements = sql_content.split(';')
+            for statement in statements:
+                statement = statement.strip()
+                if statement and not statement.startswith('--'):
+                    conn.execute(text(statement))
+
+            print(f"  ✓ Loaded initial strategy constraints")
+        else:
+            print(f"  ⚠ Seed data file not found: {constraints_file}")
+    else:
+        print(f"Strategy constraints already has {constraints_count} records, skipping seed data")
+
 
 def downgrade() -> None:
     """
@@ -100,4 +128,4 @@ def downgrade() -> None:
     If you need to remove seed data, do it manually.
     """
     print("Downgrade: Seed data is not automatically removed")
-    print("If you need to clear data, run: DELETE FROM price_history; DELETE FROM trading_config;")
+    print("If you need to clear data, run: DELETE FROM price_history; DELETE FROM trading_config; DELETE FROM strategy_constraints;")

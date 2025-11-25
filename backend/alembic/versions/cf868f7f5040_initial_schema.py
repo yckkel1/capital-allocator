@@ -110,6 +110,36 @@ def upgrade() -> None:
     op.create_index(op.f('ix_performance_metrics_id'), 'performance_metrics', ['id'], unique=False)
     op.create_index(op.f('ix_performance_metrics_date'), 'performance_metrics', ['date'], unique=True)
 
+    # Create strategy_constraints table
+    op.create_table(
+        'strategy_constraints',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('start_date', sa.Date(), nullable=False),
+        sa.Column('end_date', sa.Date(), nullable=True),
+        sa.Column('min_holding_threshold', sa.Float(), nullable=False),
+        sa.Column('capital_scale_tier1_threshold', sa.Float(), nullable=False),
+        sa.Column('capital_scale_tier1_factor', sa.Float(), nullable=False),
+        sa.Column('capital_scale_tier2_threshold', sa.Float(), nullable=False),
+        sa.Column('capital_scale_tier2_factor', sa.Float(), nullable=False),
+        sa.Column('capital_scale_tier3_threshold', sa.Float(), nullable=False),
+        sa.Column('capital_scale_tier3_factor', sa.Float(), nullable=False),
+        sa.Column('capital_scale_max_reduction', sa.Float(), nullable=False),
+        sa.Column('min_trades_for_kelly', sa.Integer(), nullable=False),
+        sa.Column('kelly_confidence_threshold', sa.Float(), nullable=False),
+        sa.Column('min_data_days', sa.Integer(), nullable=False),
+        sa.Column('pnl_horizon_short', sa.Integer(), nullable=False),
+        sa.Column('pnl_horizon_medium', sa.Integer(), nullable=False),
+        sa.Column('pnl_horizon_long', sa.Integer(), nullable=False),
+        sa.Column('risk_free_rate', sa.Float(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_by', sa.String(length=100), nullable=True),
+        sa.Column('notes', sa.String(length=500), nullable=True),
+        sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_strategy_constraints_id'), 'strategy_constraints', ['id'], unique=False)
+    op.create_index(op.f('ix_strategy_constraints_start_date'), 'strategy_constraints', ['start_date'], unique=False)
+    op.create_index(op.f('ix_strategy_constraints_end_date'), 'strategy_constraints', ['end_date'], unique=False)
+
     # Create trading_config table
     op.create_table(
         'trading_config',
@@ -142,6 +172,163 @@ def upgrade() -> None:
         sa.Column('confidence_scaling_factor', sa.Float(), nullable=False),
         sa.Column('intramonth_drawdown_limit', sa.Float(), nullable=False),
         sa.Column('circuit_breaker_reduction', sa.Float(), nullable=False),
+        # Regime Transition Detection
+        sa.Column('regime_transition_threshold', sa.Float(), nullable=False),
+        sa.Column('momentum_loss_threshold', sa.Float(), nullable=False),
+        sa.Column('momentum_gain_threshold', sa.Float(), nullable=False),
+        sa.Column('strong_trend_threshold', sa.Float(), nullable=False),
+        # Confidence Scoring
+        sa.Column('regime_confidence_divisor', sa.Float(), nullable=False),
+        sa.Column('risk_penalty_min', sa.Float(), nullable=False),
+        sa.Column('risk_penalty_max', sa.Float(), nullable=False),
+        sa.Column('trend_consistency_threshold', sa.Float(), nullable=False),
+        sa.Column('mean_reversion_base_confidence', sa.Float(), nullable=False),
+        sa.Column('consistency_bonus', sa.Float(), nullable=False),
+        sa.Column('risk_penalty_multiplier', sa.Float(), nullable=False),
+        sa.Column('confidence_bucket_high_threshold', sa.Float(), nullable=False),
+        sa.Column('confidence_bucket_medium_threshold', sa.Float(), nullable=False),
+        # Mean Reversion Signals
+        sa.Column('bb_oversold_threshold', sa.Float(), nullable=False),
+        sa.Column('bb_overbought_threshold', sa.Float(), nullable=False),
+        sa.Column('oversold_strong_bonus', sa.Float(), nullable=False),
+        sa.Column('oversold_mild_bonus', sa.Float(), nullable=False),
+        sa.Column('rsi_mild_oversold', sa.Float(), nullable=False),
+        sa.Column('bb_mild_oversold', sa.Float(), nullable=False),
+        sa.Column('overbought_penalty', sa.Float(), nullable=False),
+        # Downward Pressure Detection
+        sa.Column('price_vs_sma_threshold', sa.Float(), nullable=False),
+        sa.Column('high_volatility_threshold', sa.Float(), nullable=False),
+        sa.Column('negative_return_threshold', sa.Float(), nullable=False),
+        sa.Column('severe_pressure_threshold', sa.Float(), nullable=False),
+        sa.Column('moderate_pressure_threshold', sa.Float(), nullable=False),
+        sa.Column('severe_pressure_risk', sa.Float(), nullable=False),
+        sa.Column('moderate_pressure_risk', sa.Float(), nullable=False),
+        # Dynamic Selling Behavior
+        sa.Column('defensive_cash_threshold', sa.Float(), nullable=False),
+        sa.Column('sell_defensive_multiplier', sa.Float(), nullable=False),
+        sa.Column('sell_aggressive_multiplier', sa.Float(), nullable=False),
+        sa.Column('sell_moderate_pressure_multiplier', sa.Float(), nullable=False),
+        sa.Column('sell_bullish_risk_multiplier', sa.Float(), nullable=False),
+        # Risk-Based Thresholds
+        sa.Column('mean_reversion_max_risk', sa.Float(), nullable=False),
+        sa.Column('neutral_deleverage_risk', sa.Float(), nullable=False),
+        sa.Column('neutral_hold_risk', sa.Float(), nullable=False),
+        sa.Column('bullish_excessive_risk', sa.Float(), nullable=False),
+        sa.Column('extreme_risk_threshold', sa.Float(), nullable=False),
+        # Asset Diversification
+        sa.Column('diversify_top_asset_max', sa.Float(), nullable=False),
+        sa.Column('diversify_top_asset_min', sa.Float(), nullable=False),
+        sa.Column('diversify_second_asset_max', sa.Float(), nullable=False),
+        sa.Column('diversify_second_asset_min', sa.Float(), nullable=False),
+        sa.Column('diversify_third_asset_max', sa.Float(), nullable=False),
+        sa.Column('diversify_third_asset_min', sa.Float(), nullable=False),
+        sa.Column('two_asset_top', sa.Float(), nullable=False),
+        sa.Column('two_asset_second', sa.Float(), nullable=False),
+        # Volatility & Normalization
+        sa.Column('volatility_normalization_factor', sa.Float(), nullable=False),
+        sa.Column('stability_threshold', sa.Float(), nullable=False),
+        sa.Column('stability_discount_factor', sa.Float(), nullable=False),
+        sa.Column('correlation_risk_base', sa.Float(), nullable=False),
+        sa.Column('correlation_risk_multiplier', sa.Float(), nullable=False),
+        # Risk Score Calculation Weights
+        sa.Column('risk_volatility_weight', sa.Float(), nullable=False),
+        sa.Column('risk_correlation_weight', sa.Float(), nullable=False),
+        # Indicator Periods
+        sa.Column('rsi_period', sa.Integer(), nullable=False),
+        sa.Column('bollinger_period', sa.Integer(), nullable=False),
+        # Trend Consistency
+        sa.Column('trend_aligned_multiplier', sa.Float(), nullable=False),
+        sa.Column('trend_mixed_multiplier', sa.Float(), nullable=False),
+        # Regime Calculation Weights
+        sa.Column('regime_momentum_weight', sa.Float(), nullable=False),
+        sa.Column('regime_sma20_weight', sa.Float(), nullable=False),
+        sa.Column('regime_sma50_weight', sa.Float(), nullable=False),
+        # Adaptive Threshold Clamps
+        sa.Column('adaptive_threshold_clamp_min', sa.Float(), nullable=False),
+        sa.Column('adaptive_threshold_clamp_max', sa.Float(), nullable=False),
+        # Risk Label Thresholds
+        sa.Column('risk_label_high_threshold', sa.Float(), nullable=False),
+        sa.Column('risk_label_medium_threshold', sa.Float(), nullable=False),
+        # Strategy Tuning Parameters
+        # Market Condition Detection
+        sa.Column('market_condition_r_squared_threshold', sa.Float(), nullable=False),
+        sa.Column('market_condition_slope_threshold', sa.Float(), nullable=False),
+        sa.Column('market_condition_choppy_r_squared', sa.Float(), nullable=False),
+        sa.Column('market_condition_choppy_volatility', sa.Float(), nullable=False),
+        # Trade Evaluation Scoring
+        sa.Column('score_profitable_bonus', sa.Float(), nullable=False),
+        sa.Column('score_sharpe_bonus', sa.Float(), nullable=False),
+        sa.Column('score_low_dd_bonus', sa.Float(), nullable=False),
+        sa.Column('score_all_horizons_bonus', sa.Float(), nullable=False),
+        sa.Column('score_two_horizons_bonus', sa.Float(), nullable=False),
+        sa.Column('score_unprofitable_penalty', sa.Float(), nullable=False),
+        sa.Column('score_high_dd_penalty', sa.Float(), nullable=False),
+        sa.Column('score_sharpe_penalty', sa.Float(), nullable=False),
+        sa.Column('score_momentum_bonus', sa.Float(), nullable=False),
+        sa.Column('score_choppy_penalty', sa.Float(), nullable=False),
+        sa.Column('score_confidence_bonus', sa.Float(), nullable=False),
+        sa.Column('score_mean_reversion_bonus', sa.Float(), nullable=False),
+        # Tuning Decision Thresholds
+        sa.Column('tune_aggressive_win_rate', sa.Float(), nullable=False),
+        sa.Column('tune_aggressive_participation', sa.Float(), nullable=False),
+        sa.Column('tune_aggressive_score', sa.Float(), nullable=False),
+        sa.Column('tune_conservative_win_rate', sa.Float(), nullable=False),
+        sa.Column('tune_conservative_dd', sa.Float(), nullable=False),
+        sa.Column('tune_conservative_score', sa.Float(), nullable=False),
+        # Parameter Adjustment Amounts
+        sa.Column('tune_allocation_step', sa.Float(), nullable=False),
+        sa.Column('tune_neutral_step', sa.Float(), nullable=False),
+        sa.Column('tune_risk_threshold_step', sa.Float(), nullable=False),
+        sa.Column('tune_sharpe_aggressive_threshold', sa.Float(), nullable=False),
+        # Sell Strategy Tuning
+        sa.Column('tune_sell_effective_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_sell_underperform_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_bearish_sell_participation', sa.Float(), nullable=False),
+        sa.Column('tune_high_dd_no_sell_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_sell_major_adjustment', sa.Float(), nullable=False),
+        sa.Column('tune_sell_minor_adjustment', sa.Float(), nullable=False),
+        # Confidence Tuning
+        sa.Column('tune_low_conf_poor_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_high_conf_strong_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_confidence_threshold_step', sa.Float(), nullable=False),
+        sa.Column('tune_confidence_scaling_step', sa.Float(), nullable=False),
+        # Mean Reversion Tuning
+        sa.Column('tune_mr_good_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_mr_poor_threshold', sa.Float(), nullable=False),
+        sa.Column('tune_rsi_threshold_step', sa.Float(), nullable=False),
+        # Validation Thresholds
+        sa.Column('validation_sharpe_tolerance', sa.Float(), nullable=False),
+        sa.Column('validation_dd_tolerance', sa.Float(), nullable=False),
+        sa.Column('validation_passing_score', sa.Float(), nullable=False),
+        sa.Column('validation_sharpe_weight', sa.Float(), nullable=False),
+        sa.Column('validation_drawdown_weight', sa.Float(), nullable=False),
+        # Trade Evaluation DD Thresholds
+        sa.Column('score_dd_low_threshold', sa.Float(), nullable=False),
+        sa.Column('score_dd_high_threshold', sa.Float(), nullable=False),
+        # Parameter Tuning Boundary Limits
+        # Allocation Limits
+        sa.Column('tune_allocation_low_risk_max', sa.Float(), nullable=False),
+        sa.Column('tune_allocation_low_risk_min', sa.Float(), nullable=False),
+        sa.Column('tune_allocation_medium_risk_max', sa.Float(), nullable=False),
+        sa.Column('tune_allocation_medium_risk_min', sa.Float(), nullable=False),
+        sa.Column('tune_allocation_high_risk_min', sa.Float(), nullable=False),
+        sa.Column('tune_allocation_neutral_min', sa.Float(), nullable=False),
+        # Risk Threshold Limits
+        sa.Column('tune_risk_medium_threshold_min', sa.Float(), nullable=False),
+        sa.Column('tune_risk_high_threshold_min', sa.Float(), nullable=False),
+        # Regime Threshold Limits
+        sa.Column('tune_regime_bullish_threshold_max', sa.Float(), nullable=False),
+        sa.Column('tune_regime_bullish_threshold_min', sa.Float(), nullable=False),
+        # Sell Percentage Limits
+        sa.Column('tune_sell_percentage_min', sa.Float(), nullable=False),
+        sa.Column('tune_sell_percentage_max', sa.Float(), nullable=False),
+        # Confidence Parameter Limits
+        sa.Column('tune_min_confidence_threshold_max', sa.Float(), nullable=False),
+        sa.Column('tune_confidence_scaling_factor_max', sa.Float(), nullable=False),
+        # Mean Reversion Limits
+        sa.Column('tune_mean_reversion_allocation_max', sa.Float(), nullable=False),
+        sa.Column('tune_rsi_oversold_threshold_min', sa.Float(), nullable=False),
+        # Metadata
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
         sa.Column('created_by', sa.String(length=100), nullable=True),
         sa.Column('notes', sa.String(length=500), nullable=True),
@@ -158,6 +345,11 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_trading_config_start_date'), table_name='trading_config')
     op.drop_index(op.f('ix_trading_config_id'), table_name='trading_config')
     op.drop_table('trading_config')
+
+    op.drop_index(op.f('ix_strategy_constraints_end_date'), table_name='strategy_constraints')
+    op.drop_index(op.f('ix_strategy_constraints_start_date'), table_name='strategy_constraints')
+    op.drop_index(op.f('ix_strategy_constraints_id'), table_name='strategy_constraints')
+    op.drop_table('strategy_constraints')
 
     op.drop_index(op.f('ix_performance_metrics_date'), table_name='performance_metrics')
     op.drop_index(op.f('ix_performance_metrics_id'), table_name='performance_metrics')
