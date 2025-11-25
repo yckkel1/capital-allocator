@@ -675,12 +675,27 @@ class StrategyTuner:
             new_params.risk_medium_threshold = max(self.config.tune_risk_medium_threshold_min, new_params.risk_medium_threshold - self.config.tune_risk_threshold_step)
             print("  🌊 Detected: Too aggressive in choppy markets - reducing exposure")
 
-        # 3. Adjust max drawdown tolerance based on actual drawdown (using tunable steps and limits)
-        if overall_metrics.get('max_drawdown', 0) > new_params.max_drawdown_tolerance:
-            # Tighten risk controls
+        # 3. Adjust max drawdown tolerance based on actual drawdown (BIDIRECTIONAL TUNING - FIXED!)
+        max_dd = overall_metrics.get('max_drawdown', 0)
+        sharpe_ratio_good = overall_metrics.get('sharpe_ratio', 0) > new_params.min_sharpe_target
+
+        if max_dd > new_params.max_drawdown_tolerance:
+            # Tighten risk controls when DD exceeded
             new_params.risk_high_threshold = max(self.config.tune_risk_high_threshold_min, new_params.risk_high_threshold - self.config.tune_risk_threshold_step)
             new_params.allocation_high_risk = max(self.config.tune_allocation_high_risk_min, new_params.allocation_high_risk - self.config.tune_neutral_step)
-            print(f"  ⚠️  Max drawdown ({overall_metrics['max_drawdown']:.1f}%) exceeded tolerance - tightening risk")
+            print(f"  ⚠️  Max drawdown ({max_dd:.1f}%) exceeded tolerance - tightening risk")
+        elif max_dd < new_params.max_drawdown_tolerance * 0.5 and sharpe_ratio_good:
+            # RECOVERY LOGIC: Loosen risk controls when DD very low AND Sharpe is good
+            # This prevents permanent over-conservatism after volatility periods
+            new_params.risk_high_threshold = min(
+                self.config.tune_risk_high_threshold_max if hasattr(self.config, 'tune_risk_high_threshold_max') else 80.0,
+                new_params.risk_high_threshold + self.config.tune_risk_threshold_step
+            )
+            new_params.allocation_high_risk = min(
+                self.config.tune_allocation_high_risk_max if hasattr(self.config, 'tune_allocation_high_risk_max') else 0.5,
+                new_params.allocation_high_risk + self.config.tune_neutral_step * 0.5  # Slower recovery
+            )
+            print(f"  ✨ Low drawdown ({max_dd:.1f}%) with good Sharpe - loosening risk controls")
 
         # 4. Adjust based on Sharpe ratio (using tunable steps and limits)
         sharpe = overall_metrics.get('sharpe_ratio', 0)
@@ -765,9 +780,67 @@ class StrategyTuner:
             if mr_oversold.get('count', 0) > 0 and mr_oversold.get('win_rate', 50) < self.config.tune_mr_poor_threshold:
                 new_params.rsi_oversold_threshold = max(self.config.tune_rsi_oversold_threshold_min, new_params.rsi_oversold_threshold - self.config.tune_rsi_threshold_step)
                 print(f"  📉 Mean reversion signals underperforming - tightening RSI threshold")
+            # BIDIRECTIONAL: If MR signals performing moderately but we're too tight, loosen threshold
+            elif mr_oversold.get('count', 0) > 0 and mr_oversold.get('win_rate', 50) > 55 and new_params.rsi_oversold_threshold < 28:
+                new_params.rsi_oversold_threshold = min(
+                    self.config.tune_rsi_oversold_threshold_max if hasattr(self.config, 'tune_rsi_oversold_threshold_max') else 40.0,
+                    new_params.rsi_oversold_threshold + self.config.tune_rsi_threshold_step * 0.5  # Slower recovery
+                )
+                print(f"  📈 Mean reversion signals working with tight threshold - loosening slightly")
 
         # REMOVED: Circuit breaker tuning - strategy should learn from mistakes, not cease operations
         # Just monitor drawdown and warn in monthly reports
+
+        # 8. CRITICAL: Tune risk score calculation weights (was the original hard-coded problem!)
+        # Optimize based on risk-adjusted returns by confidence bucket
+        if confidence_analysis:
+            high_conf = confidence_analysis.get('high', {})
+            low_conf = confidence_analysis.get('low', {})
+
+            # Risk assessment is working if:
+            # - High confidence trades are very profitable (>65% win rate)
+            # - Low confidence trades are correctly identified as risky (<45% win rate)
+            risk_assessment_working = (
+                high_conf.get('count', 0) > 5 and
+                low_conf.get('count', 0) > 5 and
+                high_conf.get('win_rate', 50) > 65 and
+                low_conf.get('win_rate', 50) < 45
+            )
+
+            print(f"\n  📊 Risk Score Assessment:")
+            print(f"    High conf: {high_conf.get('count', 0)} trades, {high_conf.get('win_rate', 0):.1f}% win rate")
+            print(f"    Low conf: {low_conf.get('count', 0)} trades, {low_conf.get('win_rate', 0):.1f}% win rate")
+            print(f"    Current weights: Vol={new_params.risk_volatility_weight:.2f}, Corr={new_params.risk_correlation_weight:.2f}")
+
+            # If risk assessment is failing, adjust weights
+            # Strategy: Try different weight combinations to improve risk discrimination
+            if not risk_assessment_working and high_conf.get('count', 0) > 5 and low_conf.get('count', 0) > 5:
+                # If low confidence trades are performing TOO WELL, we're not penalizing risk enough
+                if low_conf.get('win_rate', 50) > 50:
+                    # Increase volatility weight (be more risk-averse)
+                    new_params.risk_volatility_weight = min(0.85, new_params.risk_volatility_weight + 0.05)
+                    new_params.risk_correlation_weight = max(0.15, new_params.risk_correlation_weight - 0.05)
+                    print(f"  ⚠️  Low confidence trades performing too well - increasing volatility weight")
+
+                # If high confidence trades are performing POORLY, we're being too conservative
+                elif high_conf.get('win_rate', 50) < 55:
+                    # Shift weight to correlation (focus on systematic risk over idiosyncratic)
+                    new_params.risk_volatility_weight = max(0.5, new_params.risk_volatility_weight - 0.05)
+                    new_params.risk_correlation_weight = min(0.5, new_params.risk_correlation_weight + 0.05)
+                    print(f"  📊 High confidence trades underperforming - shifting weight to correlation")
+
+                # If there's a big gap in performance, we're doing something right
+                # but can fine-tune further
+                else:
+                    win_rate_gap = high_conf.get('win_rate', 50) - low_conf.get('win_rate', 50)
+                    if win_rate_gap < 15:  # Gap too small
+                        # Try shifting toward volatility for better discrimination
+                        new_params.risk_volatility_weight = min(0.85, new_params.risk_volatility_weight + 0.03)
+                        new_params.risk_correlation_weight = max(0.15, new_params.risk_correlation_weight - 0.03)
+                        print(f"  🔍 Risk discrimination gap too small ({win_rate_gap:.1f}%) - fine-tuning weights")
+
+            elif risk_assessment_working:
+                print(f"  ✅ Risk score weights working well - maintaining current balance")
 
         return new_params
 
@@ -1041,9 +1114,17 @@ class StrategyTuner:
         print(f"   Test Max DD: {validation_result['test_max_drawdown']:.2f}%")
 
         if not validation_result['passes_validation']:
-            print("   ⚠️  WARNING: Parameters may not generalize well - consider being more conservative")
+            print("   ❌ VALIDATION FAILED: Parameters do not generalize to test period")
+            print("   🔄 Reverting to previous parameters - no changes will be deployed")
+            print(f"   Reason: Validation score {validation_result['validation_score']:.2f} < {self.config.validation_passing_score:.2f}")
+            print(f"   Test Sharpe: {validation_result['test_sharpe']:.3f} (target: {new_params.min_sharpe_target * self.config.validation_sharpe_tolerance:.3f}+)")
+            print(f"   Test Max DD: {validation_result['test_max_drawdown']:.2f}% (limit: {new_params.max_drawdown_tolerance * self.config.validation_dd_tolerance:.2f}%)")
+            print()
+            # CRITICAL FIX: Revert to old parameters instead of deploying failing ones
+            new_params = old_params
+            print("   ℹ️  Previous parameters will remain active. Review analysis to understand why tuning failed.")
         else:
-            print("   ✅ Parameters pass out-of-sample validation")
+            print("   ✅ Parameters pass out-of-sample validation - safe to deploy")
         print()
 
         # 7. Generate report
