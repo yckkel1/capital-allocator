@@ -35,6 +35,25 @@ PERCENTAGE_MULTIPLIER = 100.0
 RSI_NEUTRAL = 50.0
 RSI_MAX = 100.0
 ANNUAL_TRADING_DAYS = 252
+HALF_KELLY_FACTOR = 0.5
+HALF_KELLY_DEFAULT = 0.5
+KELLY_MIN_ALLOCATION = 0.10
+KELLY_MAX_ALLOCATION = 0.80
+
+# Time horizons and periods
+HORIZON_5D = 5
+HORIZON_10D = 10
+HORIZON_20D = 20
+HORIZON_30D = 30
+HORIZON_50D = 50
+HORIZON_60D = 60
+RSI_DEFAULT_PERIOD = 14
+BB_DEFAULT_PERIOD = 20
+
+# Default fallback values for calculations
+DEFAULT_AVG_WIN = 0.05
+DEFAULT_AVG_LOSS = 0.03
+DEFAULT_VOLATILITY_DIVISOR = 0.001
 
 
 def calculate_rsi(prices: pd.Series, period: int = None) -> float:
@@ -262,27 +281,27 @@ def calculate_multi_timeframe_features(df: pd.DataFrame) -> dict:
         dict with feature values including RSI, Bollinger Bands
     """
     # Calculate returns over different periods
-    returns_5d = (df['close'].iloc[-1] / df['close'].iloc[-5] - 1) if len(df) >= 5 else 0
-    returns_20d = (df['close'].iloc[-1] / df['close'].iloc[-20] - 1) if len(df) >= 20 else 0
-    returns_60d = (df['close'].iloc[-1] / df['close'].iloc[-60] - 1) if len(df) >= 60 else 0
+    returns_5d = (df['close'].iloc[-1] / df['close'].iloc[-HORIZON_5D] - 1) if len(df) >= HORIZON_5D else 0
+    returns_20d = (df['close'].iloc[-1] / df['close'].iloc[-HORIZON_20D] - 1) if len(df) >= HORIZON_20D else 0
+    returns_60d = (df['close'].iloc[-1] / df['close'].iloc[-HORIZON_60D] - 1) if len(df) >= HORIZON_60D else 0
 
     # Volatility (20-day rolling std of daily returns)
     daily_returns = df['close'].pct_change()
-    volatility = daily_returns.tail(20).std() if len(df) >= 20 else 0
+    volatility = daily_returns.tail(HORIZON_20D).std() if len(df) >= HORIZON_20D else 0
 
     # Simple moving averages
-    sma_20 = df['close'].tail(20).mean() if len(df) >= 20 else df['close'].iloc[-1]
-    sma_50 = df['close'].tail(50).mean() if len(df) >= 50 else df['close'].iloc[-1]
+    sma_20 = df['close'].tail(HORIZON_20D).mean() if len(df) >= HORIZON_20D else df['close'].iloc[-1]
+    sma_50 = df['close'].tail(HORIZON_50D).mean() if len(df) >= HORIZON_50D else df['close'].iloc[-1]
 
     # Current price vs SMAs
     price_vs_sma20 = (df['close'].iloc[-1] / sma_20 - 1) if sma_20 > 0 else 0
     price_vs_sma50 = (df['close'].iloc[-1] / sma_50 - 1) if sma_50 > 0 else 0
 
     # NEW: RSI calculation
-    rsi = calculate_rsi(df['close'], period=14)
+    rsi = calculate_rsi(df['close'], period=RSI_DEFAULT_PERIOD)
 
     # NEW: Bollinger Bands
-    bb = calculate_bollinger_bands(df['close'], period=20,
+    bb = calculate_bollinger_bands(df['close'], period=BB_DEFAULT_PERIOD,
                                    num_std=trading_config.bollinger_std_multiplier)
 
     return {
@@ -385,7 +404,7 @@ def rank_assets(features_by_asset: dict) -> dict:
 
     for symbol, features in features_by_asset.items():
         # Risk-adjusted momentum (primary factor)
-        momentum_score = features['returns_60d'] / max(features['volatility'], 0.001)
+        momentum_score = features['returns_60d'] / max(features['volatility'], DEFAULT_VOLATILITY_DIVISOR)
 
         # Trend consistency: Are all timeframes aligned?
         short_momentum = features.get('returns_5d', 0)
@@ -717,7 +736,7 @@ def capital_scaling_adjustment(capital: float) -> float:
         return max(max_reduction, tier3_factor - additional_reduction)
 
 
-def calculate_half_kelly(db: Session, trade_date: date, lookback_days: int = 60) -> float:
+def calculate_half_kelly(db: Session, trade_date: date, lookback_days: int = HORIZON_60D) -> float:
     """
     Calculate half Kelly allocation based on recent trade performance
 
@@ -727,7 +746,7 @@ def calculate_half_kelly(db: Session, trade_date: date, lookback_days: int = 60)
     - p = win probability
     - q = loss probability (1 - p)
 
-    Half Kelly = 0.5 × Kelly for safety margin
+    Half Kelly = HALF_KELLY_FACTOR × Kelly for safety margin
 
     Args:
         db: Database session
@@ -735,7 +754,7 @@ def calculate_half_kelly(db: Session, trade_date: date, lookback_days: int = 60)
         lookback_days: Days to look back for performance stats
 
     Returns:
-        Half Kelly allocation percentage (0-1), defaults to 0.5 if insufficient data
+        Half Kelly allocation percentage (0-1), defaults to HALF_KELLY_DEFAULT if insufficient data
     """
     lookback_start = trade_date - timedelta(days=lookback_days)
 
@@ -744,11 +763,6 @@ def calculate_half_kelly(db: Session, trade_date: date, lookback_days: int = 60)
         DailySignal.trade_date >= lookback_start,
         DailySignal.trade_date < trade_date
     ).all()
-
-    # Constants for Kelly calculation
-    HALF_KELLY_DEFAULT = 0.5
-    DEFAULT_AVG_WIN = 0.05
-    DEFAULT_AVG_LOSS = 0.03
 
     if not trades or len(trades) < constraints.min_trades_for_kelly:
         # Insufficient data - use conservative default
@@ -769,7 +783,7 @@ def calculate_half_kelly(db: Session, trade_date: date, lookback_days: int = 60)
 
         # Use signal confidence as a proxy for trade quality
         # In a full implementation, we'd track actual P&L
-        confidence = features.get('confidence_score', 0.5)
+        confidence = features.get('confidence_score', HALF_KELLY_DEFAULT)
 
         # Use tunable kelly_confidence_threshold to determine wins
         if confidence > constraints.kelly_confidence_threshold:
@@ -796,10 +810,10 @@ def calculate_half_kelly(db: Session, trade_date: date, lookback_days: int = 60)
     kelly = (win_rate * payoff_ratio - (1 - win_rate)) / payoff_ratio
 
     # Half Kelly for safety
-    half_kelly = kelly * 0.5
+    half_kelly = kelly * HALF_KELLY_FACTOR
 
-    # Clamp to reasonable range (10% to 80%)
-    return max(0.10, min(0.80, half_kelly))
+    # Clamp to reasonable range (KELLY_MIN_ALLOCATION to KELLY_MAX_ALLOCATION)
+    return max(KELLY_MIN_ALLOCATION, min(KELLY_MAX_ALLOCATION, half_kelly))
 
 
 def generate_signal(trade_date: date = None):
