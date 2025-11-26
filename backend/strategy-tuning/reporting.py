@@ -7,8 +7,8 @@ import json
 from datetime import datetime, date, timedelta
 from typing import List, Dict
 from config_loader import TradingConfig, ConfigLoader
-from .data_models import TradeEvaluation
-from .constants import REPORT_SEPARATOR_WIDTH, TOP_N_WORST_TRADES
+from data_models import TradeEvaluation
+from constants import REPORT_SEPARATOR_WIDTH, TOP_N_WORST_TRADES
 
 
 def save_parameters(config_loader: ConfigLoader, params: TradingConfig, 

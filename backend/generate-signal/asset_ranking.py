@@ -2,7 +2,7 @@
 Asset Ranking Module
 Functions for scoring and ranking assets
 """
-from .constants import DEFAULT_VOLATILITY_DIVISOR
+from constants import DEFAULT_VOLATILITY_DIVISOR
 
 
 def rank_assets(features_by_asset: dict, config) -> dict:

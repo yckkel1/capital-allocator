@@ -7,7 +7,7 @@ from typing import Dict, TYPE_CHECKING
 import numpy as np
 import math
 
-from .constants import RISK_FREE_RATE, ANNUAL_TRADING_DAYS
+from constants import RISK_FREE_RATE, ANNUAL_TRADING_DAYS
 
 if TYPE_CHECKING:
     from psycopg2.extensions import cursor

@@ -3,7 +3,7 @@ Performance Analysis Module
 Functions for analyzing performance by different conditions and criteria
 """
 from typing import List, Dict
-from .data_models import TradeEvaluation
+from data_models import TradeEvaluation
 
 
 def analyze_performance_by_condition(evaluations: List[TradeEvaluation], config) -> Dict:

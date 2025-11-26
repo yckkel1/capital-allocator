@@ -14,7 +14,7 @@ def decide_action(regime_score: float, risk_score: float, has_holdings: bool,
     Returns:
         tuple: (action: str, allocation_pct: float, signal_type: str)
     """
-    from .mean_reversion import detect_downward_pressure
+    from mean_reversion import detect_downward_pressure
     
     has_mr_opportunity, mr_type, mr_assets = mean_reversion_opportunity
 

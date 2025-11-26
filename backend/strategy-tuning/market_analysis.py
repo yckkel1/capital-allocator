@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from typing import TYPE_CHECKING
 import numpy as np
 
-from .constants import MARKET_CONDITION_WINDOW_DAYS, MARKET_CONDITION_LOOKBACK_BUFFER
+from constants import MARKET_CONDITION_WINDOW_DAYS, MARKET_CONDITION_LOOKBACK_BUFFER
 
 if TYPE_CHECKING:
     from psycopg2.extensions import cursor

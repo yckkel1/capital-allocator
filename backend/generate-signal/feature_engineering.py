@@ -3,8 +3,8 @@ Feature Engineering Module
 Functions for calculating multi-timeframe features
 """
 import pandas as pd
-from .technical_indicators import calculate_rsi, calculate_bollinger_bands
-from .constants import (
+from technical_indicators import calculate_rsi, calculate_bollinger_bands
+from constants import (
     HORIZON_5D, HORIZON_10D, HORIZON_20D, HORIZON_30D, 
     HORIZON_50D, HORIZON_60D, RSI_DEFAULT_PERIOD, BB_DEFAULT_PERIOD
 )

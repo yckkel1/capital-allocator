@@ -3,7 +3,7 @@ Position Sizing Module
 Functions for calculating position sizes using Kelly criterion and confidence scaling
 """
 from datetime import date, timedelta
-from .constants import HALF_KELLY_FACTOR, HALF_KELLY_DEFAULT, DEFAULT_AVG_WIN, DEFAULT_AVG_LOSS
+from constants import HALF_KELLY_FACTOR, HALF_KELLY_DEFAULT, DEFAULT_AVG_WIN, DEFAULT_AVG_LOSS
 
 
 def calculate_position_size(base_allocation: float, confidence: float,

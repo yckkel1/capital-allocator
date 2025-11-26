@@ -5,9 +5,9 @@ Functions for evaluating individual trades and calculating their impact
 from datetime import date, timedelta
 from typing import List, TYPE_CHECKING
 
-from .data_models import TradeEvaluation
-from .market_analysis import detect_market_condition
-from .constants import (
+from data_models import TradeEvaluation
+from market_analysis import detect_market_condition
+from constants import (
     HORIZON_10D, HORIZON_20D, HORIZON_30D,
     DRAWDOWN_WINDOW_BEFORE, DRAWDOWN_WINDOW_AFTER,
     SCORE_MIN, SCORE_MAX

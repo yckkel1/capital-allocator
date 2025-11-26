@@ -3,7 +3,7 @@ Risk Assessment Module
 Functions for calculating risk scores and confidence levels
 """
 import numpy as np
-from .constants import PERCENTAGE_MULTIPLIER
+from constants import PERCENTAGE_MULTIPLIER
 
 
 def calculate_risk_score(features_by_asset: dict, config) -> float:

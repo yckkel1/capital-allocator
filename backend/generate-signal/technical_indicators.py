@@ -3,7 +3,7 @@ Technical Indicators Module
 Functions for calculating technical indicators like RSI and Bollinger Bands
 """
 import pandas as pd
-from .constants import RSI_NEUTRAL, RSI_MAX, PERCENTAGE_MULTIPLIER
+from constants import RSI_NEUTRAL, RSI_MAX, PERCENTAGE_MULTIPLIER
 
 
 def calculate_rsi(prices: pd.Series, period: int = 14) -> float:
