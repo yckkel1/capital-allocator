@@ -81,12 +81,14 @@ INSERT INTO trading_config (
   -- Parameter Tuning Boundary Limits
   tune_allocation_low_risk_max, tune_allocation_low_risk_min,
   tune_allocation_medium_risk_max, tune_allocation_medium_risk_min,
-  tune_allocation_high_risk_min, tune_allocation_neutral_min,
-  tune_risk_medium_threshold_min, tune_risk_high_threshold_min,
+  tune_allocation_high_risk_min, tune_allocation_high_risk_max,
+  tune_allocation_neutral_min, tune_allocation_neutral_max,
+  tune_risk_medium_threshold_min, tune_risk_medium_threshold_max,
+  tune_risk_high_threshold_min, tune_risk_high_threshold_max,
   tune_regime_bullish_threshold_max, tune_regime_bullish_threshold_min,
   tune_sell_percentage_min, tune_sell_percentage_max,
   tune_min_confidence_threshold_max, tune_confidence_scaling_factor_max,
-  tune_mean_reversion_allocation_max, tune_rsi_oversold_threshold_min,
+  tune_mean_reversion_allocation_max, tune_rsi_oversold_threshold_min, tune_rsi_oversold_threshold_max,
   -- Metadata
   created_by, notes
 ) VALUES (
@@ -179,12 +181,14 @@ INSERT INTO trading_config (
   -- Parameter Tuning Boundary Limits
   1.0, 0.5,  -- allocation_low_risk max/min
   0.7, 0.3,  -- allocation_medium_risk max/min
-  0.2, 0.1,  -- allocation_high_risk_min, allocation_neutral_min
-  30.0, 60.0,  -- risk_medium_threshold_min, risk_high_threshold_min
+  0.2, 0.5,  -- allocation_high_risk_min, allocation_high_risk_max (ADDED max)
+  0.1, 0.4,  -- allocation_neutral_min, allocation_neutral_max (ADDED max)
+  30.0, 60.0,  -- risk_medium_threshold_min, risk_medium_threshold_max (ADDED max)
+  60.0, 80.0,  -- risk_high_threshold_min, risk_high_threshold_max (ADDED max)
   0.4, 0.2,  -- regime_bullish_threshold max/min
   0.3, 0.9,  -- sell_percentage min/max
   0.5, 0.8,  -- min_confidence_threshold_max, confidence_scaling_factor_max
-  0.6, 20.0,  -- mean_reversion_allocation_max, rsi_oversold_threshold_min
+  0.6, 20.0, 40.0,  -- mean_reversion_allocation_max, rsi_oversold_threshold_min, rsi_oversold_threshold_max (ADDED max)
   -- Metadata
   'initial_deployment',
   'Default configuration with all tunable parameters'

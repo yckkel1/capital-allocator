@@ -232,10 +232,14 @@ class TradingConfig:
     tune_allocation_medium_risk_max: float = 0.7
     tune_allocation_medium_risk_min: float = 0.3
     tune_allocation_high_risk_min: float = 0.2
+    tune_allocation_high_risk_max: float = 0.5  # ADDED: Prevent unbounded growth
     tune_allocation_neutral_min: float = 0.1
+    tune_allocation_neutral_max: float = 0.4  # ADDED: Prevent unbounded growth
     # Risk Threshold Limits
     tune_risk_medium_threshold_min: float = 30.0
+    tune_risk_medium_threshold_max: float = 60.0  # ADDED: Prevent unbounded growth
     tune_risk_high_threshold_min: float = 60.0
+    tune_risk_high_threshold_max: float = 80.0  # ADDED: Prevent unbounded growth
     # Regime Threshold Limits
     tune_regime_bullish_threshold_max: float = 0.4
     tune_regime_bullish_threshold_min: float = 0.2
@@ -248,6 +252,7 @@ class TradingConfig:
     # Mean Reversion Limits
     tune_mean_reversion_allocation_max: float = 0.6
     tune_rsi_oversold_threshold_min: float = 20.0
+    tune_rsi_oversold_threshold_max: float = 40.0  # ADDED: Prevent unbounded growth (RSI > 40 not very oversold)
 
     # Metadata
     id: Optional[int] = None

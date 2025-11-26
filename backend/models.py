@@ -341,10 +341,14 @@ class TradingConfig(Base):
     tune_allocation_medium_risk_max = Column(Float, nullable=False, default=0.7)
     tune_allocation_medium_risk_min = Column(Float, nullable=False, default=0.3)
     tune_allocation_high_risk_min = Column(Float, nullable=False, default=0.2)
+    tune_allocation_high_risk_max = Column(Float, nullable=False, default=0.5)  # ADDED: Prevent unbounded growth
     tune_allocation_neutral_min = Column(Float, nullable=False, default=0.1)
+    tune_allocation_neutral_max = Column(Float, nullable=False, default=0.4)  # ADDED: Prevent unbounded growth
     # Risk Threshold Limits
     tune_risk_medium_threshold_min = Column(Float, nullable=False, default=30.0)
+    tune_risk_medium_threshold_max = Column(Float, nullable=False, default=60.0)  # ADDED: Prevent unbounded growth
     tune_risk_high_threshold_min = Column(Float, nullable=False, default=60.0)
+    tune_risk_high_threshold_max = Column(Float, nullable=False, default=80.0)  # ADDED: Prevent unbounded growth
     # Regime Threshold Limits
     tune_regime_bullish_threshold_max = Column(Float, nullable=False, default=0.4)
     tune_regime_bullish_threshold_min = Column(Float, nullable=False, default=0.2)
@@ -357,6 +361,7 @@ class TradingConfig(Base):
     # Mean Reversion Limits
     tune_mean_reversion_allocation_max = Column(Float, nullable=False, default=0.6)
     tune_rsi_oversold_threshold_min = Column(Float, nullable=False, default=20.0)
+    tune_rsi_oversold_threshold_max = Column(Float, nullable=False, default=40.0)  # ADDED: Prevent unbounded growth
 
     # Regime Calculation Weights
     regime_momentum_weight = Column(Float, nullable=False, default=0.5)
