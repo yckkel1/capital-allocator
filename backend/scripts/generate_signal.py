@@ -26,34 +26,26 @@ from models import PriceHistory, DailySignal, Portfolio, PerformanceMetrics
 from config import get_settings, get_trading_config
 from constraints_loader import get_active_strategy_constraints
 
+# NOTE: These functions have been refactored into modular components
+# in backend/generate-signal/. The implementations below are kept for
+# backward compatibility, but new code should import from the modules.
+# See backend/generate-signal/BREAKDOWN.md for details.
+
+# Import from refactored modules (available for new code)
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(backend_dir, 'generate-signal'))
+
+from constants import *
+
+# Modular functions are now available:
+# from technical_indicators import calculate_rsi, calculate_bollinger_bands
+# from regime_detection import calculate_regime, detect_regime_transition
+# from risk_assessment import calculate_risk_score, calculate_confidence_score
+# etc. - see BREAKDOWN.md for full module listing
+
 settings = get_settings()
 trading_config = get_trading_config()
 constraints = get_active_strategy_constraints()
-
-# Mathematical Constants
-PERCENTAGE_MULTIPLIER = 100.0
-RSI_NEUTRAL = 50.0
-RSI_MAX = 100.0
-ANNUAL_TRADING_DAYS = 252
-HALF_KELLY_FACTOR = 0.5
-HALF_KELLY_DEFAULT = 0.5
-KELLY_MIN_ALLOCATION = 0.10
-KELLY_MAX_ALLOCATION = 0.80
-
-# Time horizons and periods
-HORIZON_5D = 5
-HORIZON_10D = 10
-HORIZON_20D = 20
-HORIZON_30D = 30
-HORIZON_50D = 50
-HORIZON_60D = 60
-RSI_DEFAULT_PERIOD = 14
-BB_DEFAULT_PERIOD = 20
-
-# Default fallback values for calculations
-DEFAULT_AVG_WIN = 0.05
-DEFAULT_AVG_LOSS = 0.03
-DEFAULT_VOLATILITY_DIVISOR = 0.001
 
 
 def calculate_rsi(prices: pd.Series, period: int = None) -> float:

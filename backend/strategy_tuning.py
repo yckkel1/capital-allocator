@@ -25,56 +25,31 @@ import numpy as np
 from config import get_settings, get_trading_config
 from config_loader import TradingConfig, ConfigLoader
 
+# Import from refactored modules
+import sys
+import os
+# Add strategy-tuning directory to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'strategy-tuning'))
+
+from constants import *
+from data_models import TradeEvaluation
+from market_analysis import detect_market_condition as _detect_market_condition
+from trade_evaluation import (
+    calculate_drawdown_contribution as _calculate_drawdown_contribution,
+    evaluate_trades as _evaluate_trades
+)
+from performance_metrics import calculate_overall_metrics as _calculate_overall_metrics
+from performance_analysis import (
+    analyze_performance_by_condition as _analyze_performance_by_condition,
+    analyze_confidence_buckets as _analyze_confidence_buckets,
+    analyze_signal_types as _analyze_signal_types
+)
+from parameter_tuning import tune_parameters as _tune_parameters
+from validation import perform_out_of_sample_validation as _perform_out_of_sample_validation
+from reporting import generate_report as _generate_report, save_parameters as _save_parameters
+
 settings = get_settings()
 DATABASE_URL = settings.database_url
-
-# Mathematical Constants
-RISK_FREE_RATE = 0.05  # 5% annual
-ANNUAL_TRADING_DAYS = 252
-PERCENTAGE_MULTIPLIER = 100.0
-SCORE_MIN = -1.0
-SCORE_MAX = 1.0
-
-# Time Horizons (days) - configurable via trading config where used
-HORIZON_10D = 10
-HORIZON_20D = 20
-HORIZON_30D = 30
-MARKET_CONDITION_WINDOW_DAYS = 20
-MARKET_CONDITION_LOOKBACK_BUFFER = 10
-DRAWDOWN_WINDOW_BEFORE = 5
-DRAWDOWN_WINDOW_AFTER = 10
-MONTH_DAYS_APPROX = 30
-TOP_N_WORST_TRADES = 5
-REPORT_SEPARATOR_WIDTH = 80
-
-
-@dataclass
-class TradeEvaluation:
-    """Evaluation of a specific trade"""
-    trade_date: date
-    symbol: str
-    action: str
-    amount: float
-    regime: str
-    market_condition: str  # 'momentum' or 'choppy'
-
-    # Impact metrics
-    contribution_to_drawdown: float  # How much this trade contributed to max DD
-    sharpe_impact: float  # Impact on Sharpe ratio
-    was_profitable: bool
-    pnl: float
-
-    # Rating (required fields must come before optional)
-    score: float  # SCORE_MIN to SCORE_MAX, negative = bad trade, positive = good trade
-    should_have_avoided: bool
-
-    # Enhanced metrics (NEW) - optional fields with defaults
-    pnl_10d: float = 0.0  # P&L at HORIZON_10D days
-    pnl_20d: float = 0.0  # P&L at HORIZON_20D days
-    pnl_30d: float = 0.0  # P&L at HORIZON_30D days
-    best_horizon: str = "10d"  # Which horizon was most profitable
-    confidence_bucket: str = "unknown"  # Signal confidence bucket
-    signal_type: str = "unknown"  # Type of signal (momentum, mean_reversion, etc.)
 
 
 class StrategyTuner:
@@ -119,115 +94,26 @@ class StrategyTuner:
     def detect_market_condition(self, trade_date: date, window: int = MARKET_CONDITION_WINDOW_DAYS) -> str:
         """
         Detect if market was in momentum or choppy condition
-
-        Args:
-            trade_date: Date to analyze
-            window: Lookback window for analysis
-
-        Returns:
-            'momentum' or 'choppy'
+        Delegates to market_analysis module
         """
-        lookback_start = trade_date - timedelta(days=window + MARKET_CONDITION_LOOKBACK_BUFFER)
-
-        # Get SPY prices for the period
-        self.cursor.execute("""
-            SELECT date, close_price
-            FROM price_history
-            WHERE symbol = 'SPY'
-            AND date >= %s AND date <= %s
-            ORDER BY date
-        """, (lookback_start, trade_date))
-
-        prices = [float(row['close_price']) for row in self.cursor.fetchall()]
-
-        if len(prices) < window:
-            return 'unknown'
-
-        prices = prices[-window:]
-
-        # Calculate trend strength
-        # 1. Linear regression slope (trend direction)
-        x = np.arange(len(prices))
-        y = np.array(prices)
-        slope, _ = np.polyfit(x, y, 1)
-
-        # 2. R-squared (trend consistency)
-        y_pred = slope * x + np.mean(y) - slope * np.mean(x)
-        ss_res = np.sum((y - y_pred) ** 2)
-        ss_tot = np.sum((y - np.mean(y)) ** 2)
-        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
-
-        # 3. Price volatility
-        returns = np.diff(prices) / prices[:-1]
-        volatility = np.std(returns)
-
-        # Decision logic using tunable thresholds:
-        # Strong momentum: High R-squared and clear trend
-        # Choppy: Low R-squared or high volatility with no clear trend
-
-        if r_squared > self.config.market_condition_r_squared_threshold and \
-           abs(slope) > self.config.market_condition_slope_threshold:
-            return 'momentum'
-        elif r_squared < self.config.market_condition_choppy_r_squared or \
-             volatility > self.config.market_condition_choppy_volatility:
-            return 'choppy'
-        else:
-            return 'mixed'
+        return _detect_market_condition(self.cursor, self.config, trade_date, window)
 
     def calculate_drawdown_contribution(self, trade_date: date, trade_pnl: float) -> float:
         """
         Calculate how much a trade contributed to maximum drawdown
-
-        Returns:
-            Float between 0-100 representing percentage contribution
+        Delegates to trade_evaluation module
         """
-        # Get performance data around the trade
-        window_start = trade_date - timedelta(days=DRAWDOWN_WINDOW_BEFORE)
-        window_end = trade_date + timedelta(days=DRAWDOWN_WINDOW_AFTER)
-
-        self.cursor.execute("""
-            SELECT date, total_value
-            FROM performance_metrics
-            WHERE date >= %s AND date <= %s
-            ORDER BY date
-        """, (window_start, window_end))
-
-        values = [(row['date'], float(row['total_value'])) for row in self.cursor.fetchall()]
-
-        if len(values) < 2:
-            return 0.0
-
-        # Find peak before trade and trough after
-        trade_idx = None
-        for i, (d, _) in enumerate(values):
-            if d >= trade_date:
-                trade_idx = i
-                break
-
-        if trade_idx is None or trade_idx == 0:
-            return 0.0
-
-        peak_value = max(v for _, v in values[:trade_idx + 1])
-        trough_value = min(v for _, v in values[trade_idx:]) if trade_idx < len(values) else values[-1][1]
-
-        # Calculate drawdown
-        drawdown_pct = ((peak_value - trough_value) / peak_value * 100) if peak_value > 0 else 0
-
-        # If trade lost money and there was a drawdown, attribute proportionally
-        if trade_pnl < 0 and drawdown_pct > 0:
-            # Contribution is based on how much the trade lost relative to the drawdown
-            contribution = min(100, abs(trade_pnl) / (peak_value * drawdown_pct / 100) * 100)
-            return contribution
-
-        return 0.0
+        return _calculate_drawdown_contribution(self.cursor, trade_date, trade_pnl)
 
     def evaluate_trades(self, start_date: date, end_date: date) -> List[TradeEvaluation]:
         """
         Evaluate all trades in the period with multi-horizon analysis
-
-        Returns:
-            List of TradeEvaluation objects
+        Delegates to trade_evaluation module
         """
+        return _evaluate_trades(self.cursor, self.config, start_date, end_date)
+
+    def evaluate_trades_OLD_IMPLEMENTATION(self, start_date: date, end_date: date) -> List[TradeEvaluation]:
+        """OLD IMPLEMENTATION - Kept for reference, now delegated to module"""
         evaluations = []
 
         # Get all trades in period
@@ -387,10 +273,10 @@ class StrategyTuner:
         return evaluations
 
     def analyze_performance_by_condition(self, evaluations: List[TradeEvaluation]) -> Dict:
-        """
-        Analyze performance in different market conditions
+        """Analyze performance in different market conditions - Delegates to performance_analysis module"""
+        return _analyze_performance_by_condition(evaluations, self.config)
 
-        Returns:
+    def analyze_performance_by_condition_OLD_IMPLEMENTATION(self, evaluations: List[TradeEvaluation]) -> Dict:
             Dictionary with performance metrics by condition
         """
         momentum_trades = [e for e in evaluations if e.market_condition == 'momentum']
@@ -451,10 +337,10 @@ class StrategyTuner:
         }
 
     def analyze_confidence_buckets(self, evaluations: List[TradeEvaluation]) -> Dict:
-        """
-        Analyze performance by confidence bucket
+        """Analyze performance by confidence bucket - Delegates to performance_analysis module"""
+        return _analyze_confidence_buckets(evaluations)
 
-        Returns:
+    def analyze_confidence_buckets_OLD_IMPLEMENTATION(self, evaluations: List[TradeEvaluation]) -> Dict:
             Dictionary with performance metrics by confidence level
         """
         high_conf = [e for e in evaluations if e.confidence_bucket == 'high']
@@ -503,10 +389,10 @@ class StrategyTuner:
         }
 
     def analyze_signal_types(self, evaluations: List[TradeEvaluation]) -> Dict:
-        """
-        Analyze performance by signal type (momentum vs mean reversion)
+        """Analyze performance by signal type - Delegates to performance_analysis module"""
+        return _analyze_signal_types(evaluations)
 
-        Returns:
+    def analyze_signal_types_OLD_IMPLEMENTATION(self, evaluations: List[TradeEvaluation]) -> Dict:
             Dictionary with performance metrics by signal type
         """
         signal_groups = {}
@@ -575,10 +461,10 @@ class StrategyTuner:
         }
 
     def calculate_overall_metrics(self, start_date: date, end_date: date) -> Dict:
-        """Calculate overall performance metrics for the period"""
-        self.cursor.execute("""
-            SELECT * FROM performance_metrics
-            WHERE date >= %s AND date <= %s
+        """Calculate overall performance metrics - Delegates to performance_metrics module"""
+        return _calculate_overall_metrics(self.cursor, start_date, end_date)
+
+    def calculate_overall_metrics_OLD_IMPLEMENTATION(self, start_date: date, end_date: date) -> Dict:
             ORDER BY date
         """, (start_date, end_date))
 
@@ -860,14 +746,14 @@ class StrategyTuner:
             elif risk_assessment_working:
                 print(f"  ✅ Risk score weights working well - maintaining current balance")
 
-        return new_params
+        return _tune_parameters(self.current_params, self.config, evaluations, condition_analysis, overall_metrics, confidence_analysis, signal_type_analysis)
 
     def save_parameters(self, params: TradingConfig, report_path: str, start_date: date):
         """
         Save parameters to database as a new version
+        _save_parameters(self.config_loader, params, report_path, start_date)
 
-        Args:
-            params: New configuration parameters
+    def save_parameters_OLD_IMPLEMENTATION(self, params: TradingConfig, report_path: str, start_date: date):
             report_path: Path to the report file
             start_date: Start date for the new configuration
         """
