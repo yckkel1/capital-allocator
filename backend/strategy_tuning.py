@@ -27,7 +27,25 @@ from config_loader import TradingConfig, ConfigLoader
 
 settings = get_settings()
 DATABASE_URL = settings.database_url
+
+# Mathematical Constants
 RISK_FREE_RATE = 0.05  # 5% annual
+ANNUAL_TRADING_DAYS = 252
+PERCENTAGE_MULTIPLIER = 100.0
+SCORE_MIN = -1.0
+SCORE_MAX = 1.0
+
+# Time Horizons (days) - configurable via trading config where used
+HORIZON_10D = 10
+HORIZON_20D = 20
+HORIZON_30D = 30
+MARKET_CONDITION_WINDOW_DAYS = 20
+MARKET_CONDITION_LOOKBACK_BUFFER = 10
+DRAWDOWN_WINDOW_BEFORE = 5
+DRAWDOWN_WINDOW_AFTER = 10
+MONTH_DAYS_APPROX = 30
+TOP_N_WORST_TRADES = 5
+REPORT_SEPARATOR_WIDTH = 80
 
 
 @dataclass
@@ -47,13 +65,13 @@ class TradeEvaluation:
     pnl: float
 
     # Rating (required fields must come before optional)
-    score: float  # -1 to 1, negative = bad trade, positive = good trade
+    score: float  # SCORE_MIN to SCORE_MAX, negative = bad trade, positive = good trade
     should_have_avoided: bool
 
     # Enhanced metrics (NEW) - optional fields with defaults
-    pnl_10d: float = 0.0  # P&L at 10 days
-    pnl_20d: float = 0.0  # P&L at 20 days
-    pnl_30d: float = 0.0  # P&L at 30 days
+    pnl_10d: float = 0.0  # P&L at HORIZON_10D days
+    pnl_20d: float = 0.0  # P&L at HORIZON_20D days
+    pnl_30d: float = 0.0  # P&L at HORIZON_30D days
     best_horizon: str = "10d"  # Which horizon was most profitable
     confidence_bucket: str = "unknown"  # Signal confidence bucket
     signal_type: str = "unknown"  # Type of signal (momentum, mean_reversion, etc.)
@@ -83,7 +101,7 @@ class StrategyTuner:
     def get_analysis_period(self) -> Tuple[date, date]:
         """Get the date range for analysis (last N months)"""
         end_date = date.today() - timedelta(days=1)  # Yesterday
-        start_date = end_date - timedelta(days=self.lookback_months * 30)
+        start_date = end_date - timedelta(days=self.lookback_months * MONTH_DAYS_APPROX)
 
         # Adjust to actual trading days
         self.cursor.execute("""
@@ -98,7 +116,7 @@ class StrategyTuner:
         else:
             raise Exception(f"No performance data found for the last {self.lookback_months} months")
 
-    def detect_market_condition(self, trade_date: date, window: int = 20) -> str:
+    def detect_market_condition(self, trade_date: date, window: int = MARKET_CONDITION_WINDOW_DAYS) -> str:
         """
         Detect if market was in momentum or choppy condition
 
@@ -109,7 +127,7 @@ class StrategyTuner:
         Returns:
             'momentum' or 'choppy'
         """
-        lookback_start = trade_date - timedelta(days=window + 10)
+        lookback_start = trade_date - timedelta(days=window + MARKET_CONDITION_LOOKBACK_BUFFER)
 
         # Get SPY prices for the period
         self.cursor.execute("""
@@ -164,8 +182,8 @@ class StrategyTuner:
             Float between 0-100 representing percentage contribution
         """
         # Get performance data around the trade
-        window_start = trade_date - timedelta(days=5)
-        window_end = trade_date + timedelta(days=10)
+        window_start = trade_date - timedelta(days=DRAWDOWN_WINDOW_BEFORE)
+        window_end = trade_date + timedelta(days=DRAWDOWN_WINDOW_AFTER)
 
         self.cursor.execute("""
             SELECT date, total_value
@@ -235,7 +253,7 @@ class StrategyTuner:
 
             features = trade['features_used']
             regime_score = features.get('regime', 0)
-            regime = 'bullish' if regime_score > 0.3 else 'bearish' if regime_score < -0.3 else 'neutral'
+            regime = 'bullish' if regime_score > self.config.regime_classification_bullish_threshold else 'bearish' if regime_score < self.config.regime_classification_bearish_threshold else 'neutral'
 
             # NEW: Extract confidence bucket and signal type from features
             confidence_bucket = features.get('confidence_bucket', 'unknown')
@@ -244,9 +262,9 @@ class StrategyTuner:
             # Detect market condition
             market_condition = self.detect_market_condition(trade_date)
 
-            # NEW: Multi-horizon P&L calculation (10d, 20d, 30d)
+            # NEW: Multi-horizon P&L calculation
             pnl_horizons = {}
-            for horizon, days in [('10d', 10), ('20d', 20), ('30d', 30)]:
+            for horizon, days in [('10d', HORIZON_10D), ('20d', HORIZON_20D), ('30d', HORIZON_30D)]:
                 future_date = trade_date + timedelta(days=days)
 
                 self.cursor.execute("""
@@ -286,7 +304,7 @@ class StrategyTuner:
             if market_condition == 'momentum' and action == 'BUY' and regime == 'bullish':
                 sharpe_impact = self.config.score_momentum_bonus
             elif market_condition == 'choppy' and action == 'HOLD':
-                sharpe_impact = self.config.score_momentum_bonus * 0.5  # Half bonus for avoiding risk
+                sharpe_impact = self.config.score_momentum_bonus * self.config.score_hold_bonus_multiplier
             elif market_condition == 'choppy' and action == 'BUY':
                 sharpe_impact = self.config.score_choppy_penalty
 
@@ -334,13 +352,13 @@ class StrategyTuner:
             elif confidence_bucket == 'low' and not was_profitable:
                 score += self.config.score_confidence_bonus  # Avoiding losses is good
 
-            score = max(-1.0, min(1.0, score))  # Clamp to [-1, 1]
+            score = max(SCORE_MIN, min(SCORE_MAX, score))  # Clamp to [SCORE_MIN, SCORE_MAX]
 
             # Should have avoided?
             should_have_avoided = (
-                drawdown_contribution > 20 or
+                drawdown_contribution > self.config.should_avoid_dd_threshold or
                 (market_condition == 'choppy' and action == 'BUY' and not was_profitable) or
-                (confidence_bucket == 'low' and not was_profitable and pnl_horizons['10d'] < -50)
+                (confidence_bucket == 'low' and not was_profitable and pnl_horizons['10d'] < self.config.should_avoid_loss_threshold)
             )
 
             evaluation = TradeEvaluation(
@@ -580,7 +598,7 @@ class StrategyTuner:
         if len(daily_returns) > 1:
             mean_return = np.mean(daily_returns)
             std_return = np.std(daily_returns, ddof=1)
-            sharpe = (mean_return * 252 - RISK_FREE_RATE) / (std_return * math.sqrt(252)) if std_return > 0 else 0
+            sharpe = (mean_return * ANNUAL_TRADING_DAYS - RISK_FREE_RATE) / (std_return * math.sqrt(ANNUAL_TRADING_DAYS)) if std_return > 0 else 0
         else:
             sharpe = 0
 
@@ -719,7 +737,7 @@ class StrategyTuner:
             avg_sell_score = sum(e.score for e in sell_evals) / len(sell_evals)
 
             # Check if sells avoided drawdowns
-            sells_avoided_dd = sum(1 for e in sell_evals if e.contribution_to_drawdown < 5) / len(sell_evals)
+            sells_avoided_dd = sum(1 for e in sell_evals if e.contribution_to_drawdown < self.config.sell_good_dd_threshold) / len(sell_evals)
 
             print(f"\n  📊 SELL Analysis:")
             print(f"    Sell trades: {len(sell_evals)} ({sell_effectiveness*100:.1f}% effective)")
@@ -897,47 +915,47 @@ class StrategyTuner:
             print(text)
             report_lines.append(text)
 
-        add(f"\n{'='*80}")
+        add(f"\n{'='*REPORT_SEPARATOR_WIDTH}")
         add(f"📊 MONTHLY STRATEGY TUNING REPORT")
-        add(f"{'='*80}\n")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}\n")
         add(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         add(f"Analysis Period: {start_date} to {end_date}")
         add(f"Total Trading Days: {overall_metrics.get('total_days', 0)}\n")
 
         # Overall Performance
-        add(f"{'='*80}")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}")
         add(f"📈 OVERALL PERFORMANCE METRICS")
-        add(f"{'='*80}\n")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}\n")
         add(f"Total Return: {overall_metrics.get('total_return', 0):+.2f}%")
         add(f"Sharpe Ratio: {overall_metrics.get('sharpe_ratio', 0):.3f}")
         add(f"Max Drawdown: {overall_metrics.get('max_drawdown', 0):.2f}%")
         add()
 
         # Trade Evaluations Summary
-        add(f"{'='*80}")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}")
         add(f"🔍 TRADE EVALUATION SUMMARY")
-        add(f"{'='*80}\n")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}\n")
 
         bad_trades = [e for e in evaluations if e.should_have_avoided]
-        good_trades = [e for e in evaluations if e.score > 0.3]
+        good_trades = [e for e in evaluations if e.score > self.config.good_trade_score_threshold]
 
         add(f"Total Trades Analyzed: {len(evaluations)}")
-        add(f"Good Trades (score > 0.3): {len(good_trades)} ({len(good_trades)/len(evaluations)*100:.1f}%)")
+        add(f"Good Trades (score > {self.config.good_trade_score_threshold}): {len(good_trades)} ({len(good_trades)/len(evaluations)*100:.1f}%)")
         add(f"Trades That Should Have Been Avoided: {len(bad_trades)} ({len(bad_trades)/len(evaluations)*100:.1f}%)")
         add()
 
         if bad_trades:
             add("❌ Worst Trades (should have avoided):")
-            for trade in sorted(bad_trades, key=lambda x: x.score)[:5]:
+            for trade in sorted(bad_trades, key=lambda x: x.score)[:TOP_N_WORST_TRADES]:
                 add(f"  {trade.trade_date} | {trade.symbol} {trade.action} | "
                     f"Condition: {trade.market_condition} | DD contribution: {trade.contribution_to_drawdown:.1f}% | "
                     f"P&L: ${trade.pnl:+.2f}")
             add()
 
         # Performance by Market Condition
-        add(f"{'='*80}")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}")
         add(f"🌍 PERFORMANCE BY MARKET CONDITION")
-        add(f"{'='*80}\n")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}\n")
 
         for condition in ['momentum', 'choppy', 'overall']:
             perf = condition_analysis[condition]
@@ -957,9 +975,9 @@ class StrategyTuner:
             add()
 
         # Parameter Changes
-        add(f"{'='*80}")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}")
         add(f"🔧 PARAMETER ADJUSTMENTS")
-        add(f"{'='*80}\n")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}\n")
 
         changes_made = False
         old_dict = old_params.to_dict()
@@ -997,9 +1015,9 @@ class StrategyTuner:
             add("📋 SUMMARY: Parameters have been adjusted based on performance analysis.\n")
 
         # Recommendations
-        add(f"{'='*80}")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}")
         add(f"💡 RECOMMENDATIONS")
-        add(f"{'='*80}\n")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}\n")
 
         max_dd = overall_metrics.get('max_drawdown', 0)
         if max_dd > old_params.max_drawdown_tolerance:
@@ -1010,22 +1028,22 @@ class StrategyTuner:
         if overall_metrics.get('sharpe_ratio', 0) < old_params.min_sharpe_target:
             add(f"📊 Sharpe ratio below target - focus on risk-adjusted returns")
 
-        if condition_analysis['choppy']['avg_drawdown_contribution'] > 20:
+        if condition_analysis['choppy']['avg_drawdown_contribution'] > self.config.report_choppy_high_dd_threshold:
             add(f"🌊 High drawdown in choppy markets - reduce exposure during uncertainty")
 
-        if condition_analysis['momentum']['win_rate'] > 70 and condition_analysis['momentum']['buy_count'] < condition_analysis['momentum']['count'] * 0.5:
+        if condition_analysis['momentum']['win_rate'] > self.config.report_momentum_strong_win_rate and condition_analysis['momentum']['buy_count'] < condition_analysis['momentum']['count'] * self.config.report_momentum_participation_threshold:
             add(f"📈 Missing opportunities in momentum markets - consider more aggressive positioning")
 
         add()
-        add(f"{'='*80}")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}")
         add(f"📝 NEXT STEPS")
-        add(f"{'='*80}\n")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}\n")
         add("1. Review the parameter changes above")
         add("2. New parameters have been saved to the database and will be active from the specified start date")
         add("3. Run backtest with new parameters to validate improvements")
         add("4. Monitor performance over the next month")
         add()
-        add(f"{'='*80}\n")
+        add(f"{'='*REPORT_SEPARATOR_WIDTH}\n")
 
         # Save report
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -1047,9 +1065,9 @@ class StrategyTuner:
 
     def run(self):
         """Main execution flow"""
-        print(f"\n{'='*80}")
+        print(f"\n{'='*REPORT_SEPARATOR_WIDTH}")
         print(f"🚀 STARTING ENHANCED MONTHLY STRATEGY TUNING")
-        print(f"{'='*80}\n")
+        print(f"{'='*REPORT_SEPARATOR_WIDTH}\n")
 
         # 1. Determine analysis period
         print("📅 Determining analysis period...")
@@ -1143,9 +1161,9 @@ class StrategyTuner:
         next_config_start_date = date(today.year, today.month, 1)
         self.save_parameters(new_params, report_path, next_config_start_date)
 
-        print(f"\n{'='*80}")
+        print(f"\n{'='*REPORT_SEPARATOR_WIDTH}")
         print(f"✅ ENHANCED MONTHLY TUNING COMPLETED")
-        print(f"{'='*80}\n")
+        print(f"{'='*REPORT_SEPARATOR_WIDTH}\n")
 
 
 def main():
